@@ -11,7 +11,7 @@ import {
 } from "../services/freeTalkService";
 import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, RotateCcw, X, Sparkles } from "lucide-react";
 
-type Phase = "onboarding" | "resume" | "conversation" | "finished";
+type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
 const CLOUD_API = "https://script.google.com/macros/s/AKfycbw0VN6XVNz_qdEx6zmAI5YMTPQG7acYcssVqBC4q5WO0vjbXV0H8oHqfbUZWURhIHhE/exec";
 
 function buildKickoff(_name: string): string { return "Hello, AURIX!"; }
@@ -78,24 +78,27 @@ function pickNaturalVoice(lang: string): SpeechSynthesisVoice | null {
   return voices.find((x) => x.lang.startsWith(pre)) || null;
 }
 
-function buildReplyHints(text: string): string[] {
+function buildReplyHints(text: string): { en: string; es: string }[] {
   const t = (text || "").trim();
   if (!t.endsWith("?")) return [];
   const low = t.toLowerCase();
-  if (low.startsWith("why")) return ["Because I love it!", "Because it is fun!", "I do not know!"];
-  if (low.includes("how are you")) return ["I am great!", "I am okay!", "A little tired!"];
-  if (low.startsWith("what")) return ["Music!", "My family!", "My job!"];
-  if (low.startsWith("where")) return ["At home!", "In my city!", "At work!"];
-  if (low.startsWith("when")) return ["Today!", "Yesterday!", "On weekends!"];
-  if (low.startsWith("who")) return ["My family!", "My friends!", "Me!"];
+  const H = (en: string, es: string) => ({ en, es });
+  if (low.startsWith("why")) return [H("Because I love it!", "¡Porque me encanta!"), H("Because it is fun!", "¡Porque es divertido!"), H("I do not know!", "¡No sé!")];
+  if (low.includes("how are you")) return [H("I am great!", "¡Estoy muy bien!"), H("I am okay!", "¡Estoy bien!"), H("A little tired!", "¡Un poco cansado!")];
+  if (low.startsWith("what")) return [H("Music!", "¡Música!"), H("My family!", "¡Mi familia!"), H("My job!", "¡Mi trabajo!")];
+  if (low.startsWith("where")) return [H("At home!", "¡En casa!"), H("In my city!", "¡En mi ciudad!"), H("At work!", "¡En el trabajo!")];
+  if (low.startsWith("when")) return [H("Today!", "¡Hoy!"), H("Yesterday!", "¡Ayer!"), H("On weekends!", "¡Los fines de semana!")];
+  if (low.startsWith("who")) return [H("My family!", "¡Mi familia!"), H("My friends!", "¡Mis amigos!"), H("Me!", "¡Yo!")];
   const m = low.match(/^(is|are|am|do|does|did|can|will|would)\b/);
   if (m) {
     const a = m[1];
-    const yes: Record<string, string> = { is: "Yes, it is!", are: "Yes, I am!", am: "Yes, I am!", do: "Yes, I do!", does: "Yes, it does!", did: "Yes, I did!", can: "Yes, I can!", will: "Yes, I will!", would: "Yes, I would!" };
-    const no: Record<string, string> = { is: "No, it is not!", are: "No, I am not!", am: "No, I am not!", do: "No, I do not!", does: "No, it does not!", did: "No, I did not!", can: "No, I cannot!", will: "No, I will not!", would: "No, I would not!" };
-    return [yes[a] || "Yes!", no[a] || "No!", "Sometimes!"];
+    const yes: Record<string, [string, string]> = { is: ["Yes, it is!", "¡Sí, así es!"], are: ["Yes, I am!", "¡Sí!"], am: ["Yes, I am!", "¡Sí!"], do: ["Yes, I do!", "¡Sí!"], does: ["Yes, it does!", "¡Sí!"], did: ["Yes, I did!", "¡Sí!"], can: ["Yes, I can!", "¡Sí, puedo!"], will: ["Yes, I will!", "¡Sí, lo haré!"], would: ["Yes, I would!", "¡Sí, lo haría!"] };
+    const no: Record<string, [string, string]> = { is: ["No, it is not!", "¡No, no es así!"], are: ["No, I am not!", "¡No!"], am: ["No, I am not!", "¡No!"], do: ["No, I do not!", "¡No!"], does: ["No, it does not!", "¡No!"], did: ["No, I did not!", "¡No!"], can: ["No, I cannot!", "¡No, no puedo!"], will: ["No, I will not!", "¡No, no lo haré!"], would: ["No, I would not!", "¡No, no lo haría!"] };
+    const y = yes[a] || ["Yes!", "¡Sí!"];
+    const n = no[a] || ["No!", "¡No!"];
+    return [H(y[0], y[1]), H(n[0], n[1]), H("Sometimes!", "¡A veces!")];
   }
-  return ["Yes!", "No!", "Tell me more!"];
+  return [H("Yes!", "¡Sí!"), H("No!", "¡No!"), H("Tell me more!", "¡Cuéntame más!")];
 }
 
 function playTransition() {
@@ -181,12 +184,15 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [liveTranscript, setLiveTranscript] = useState("");
   const [micStatus, setMicStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
   const [finishing, setFinishing] = useState(false);
-  const [replyHints, setReplyHints] = useState<string[]>([]);
+  const [replyHints, setReplyHints] = useState<{ en: string; es: string }[]>([]);
   const [summary, setSummary] = useState<{ en: string; es: string }>({ en: "", es: "" });
   const [cloudUsers, setCloudUsers] = useState<{ id: string; nickname: string }[]>([]);
+  const [cloudTick, setCloudTick] = useState(0);
 
   const recognitionRef = useRef<any>(null);
   const sendMessageRef = useRef<any>(null);
+  const pendingGreetRef = useRef<string>("");
+  const lastSummaryRef = useRef<string>("");
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const messagesRef = useRef<FreeTalkTurn[]>([]);
   const historyReadyRef = useRef(false);
@@ -459,6 +465,12 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       s = { en: "We had a nice conversation.", es: "Tuvimos una linda conversación." };
     }
     freeTalkStore.setSummary(s.en, s.es);
+    try {
+      const uidSum = localStorage.getItem("aurix_cloud_user") || "";
+      if (uidSum) {
+        fetch(CLOUD_API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "saveSummary", user_id: uidSum, summary_en: s.en, summary_es: s.es }) }).catch(() => {});
+      }
+    } catch (e) {}
     freeTalkStore.markCompleted();
     freeTalkStore.saveHistory(messagesRef.current);
     setSummary(s);
@@ -474,6 +486,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   };
 
   const startNewSession = () => {
+    setCloudTick((t) => t + 1);
     freeTalkStore.reset();
     setMessages([]);
     setNickname("");
@@ -486,6 +499,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   };
 
   const handleResetApp = () => {
+    setCloudTick((t) => t + 1);
     if (!window.confirm("¿Borrar todo el historial y empezar el protocolo desde el inicio?")) {
       return;
     }
@@ -776,6 +790,23 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     );
   };
 
+  const handleExit = () => {
+    stopSpeaking();
+    setPhase("off");
+    setTimeout(() => speakNarrator("Hasta pronto, " + (nickname || "amigo") + ". Aquí estaré cuando quieras platicar."), 400);
+  };
+
+  const renderOff = () => (
+    <div className="flex flex-col items-center gap-5 text-center">
+      <div className="w-24 h-24 rounded-full border border-white/10 bg-[#0a0c12] flex items-center justify-center">
+        <span className="text-3xl">🌙</span>
+      </div>
+      <h2 className="text-xl font-geist font-bold text-white">AURIX descansa</h2>
+      <p className="text-sm text-[#849495] leading-relaxed">Tu conversación quedó guardada en tu perfil. Cuando vuelvas, recordaré nuestra última plática.</p>
+      <button onClick={() => setPhase("conversation")} className="ft-btn-primary flex items-center gap-2">⚡ Volver a la conversación</button>
+    </div>
+  );
+
   const renderFinished = () => (
     <div className="flex flex-col gap-4 max-w-md w-full">
       <h2 className="text-2xl font-geist font-bold text-white">Conversación guardada 💾</h2>
@@ -791,8 +822,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         La próxima vez que vengas, el narrador te leerá este resumen y retomaremos donde quedamos.
       </p>
       <div className="flex gap-3">
-        <button onClick={startNewSession} className="ft-btn-primary flex-1 flex items-center justify-center gap-2">
-          <RotateCcw className="w-4 h-4" /> Nueva conversación
+        <button onClick={() => setPhase("conversation")} className="ft-btn-primary flex-1 flex items-center justify-center gap-2">
+          <Mic className="w-4 h-4" /> Volver a la conversación
+        </button>
+        <button onClick={handleExit} className="ft-btn-secondary flex-1 flex items-center justify-center gap-2">
+          🌙 Apagar / Salir
         </button>
         {onExit && (
           <button onClick={onExit} className="ft-btn-secondary">
@@ -979,7 +1013,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       setMessages([...savedHistory, greet]);
       historyReadyRef.current = savedHistory.length > 0;
       setPhase("conversation");
-      setTimeout(() => speakFriend(greet.text), 900);
+      pendingGreetRef.current = greet.text;
     } else {
       setObStep(0);
       setPhase("onboarding");
@@ -1009,6 +1043,25 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           const name = String(data.user.nickname).trim();
           if (!name) return;
           freeTalkStore.setNickname(name);
+          let sumEs = "";
+          try {
+            const ls = await fetch(CLOUD_API + "?action=latestSummary&user_id=" + encodeURIComponent(uid)).then((r) => r.json());
+            if (ls && ls.ok && ls.summary) sumEs = ls.summary.summary_es || "";
+          } catch (e) {}
+          if (!sumEs) sumEs = freeTalkStore.getSummary().es || "";
+          lastSummaryRef.current = sumEs;
+          if (pendingGreetRef.current) {
+            const g = pendingGreetRef.current;
+            pendingGreetRef.current = "";
+            setTimeout(() => {
+              if (sumEs) {
+                speakNarrator("¡Hola " + name + "! Qué gusto verte de nuevo. La última vez platicamos sobre: " + cleanTTS(sumEs) + " ¿Continuamos donde quedamos?");
+                setTimeout(() => speakFriend(g), 6000);
+              } else {
+                speakFriend(g);
+              }
+            }, 700);
+          }
           setNickname(name);
           setObStep((s) => (s === 0 ? 1 : s));
         }
@@ -1017,7 +1070,8 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       }
     })();
     return () => { cancel = true; };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudTick]);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [topVisible, setTopVisible] = useState(true);
@@ -1103,10 +1157,13 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           <div className="h-full w-full flex flex-col">{renderConversation()}</div>
         )}
         {phase === "finished" && renderFinished()}
+        {phase === "off" && renderOff()}
       </main>
     </div>
   );
 };
+
+
 
 
 
