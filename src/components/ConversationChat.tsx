@@ -79,26 +79,58 @@ function pickNaturalVoice(lang: string): SpeechSynthesisVoice | null {
 }
 
 function buildReplyHints(text: string): { en: string; es: string }[] {
-  const t = (text || "").trim();
-  if (!t.endsWith("?")) return [];
-  const low = t.toLowerCase();
+  const t = (text || "").trim().toLowerCase();
   const H = (en: string, es: string) => ({ en, es });
-  if (low.startsWith("why")) return [H("Because I love it!", "¡Porque me encanta!"), H("Because it is fun!", "¡Porque es divertido!"), H("I do not know!", "¡No sé!")];
-  if (low.includes("how are you")) return [H("I am great!", "¡Estoy muy bien!"), H("I am okay!", "¡Estoy bien!"), H("A little tired!", "¡Un poco cansado!")];
-  if (low.startsWith("what")) return [H("Music!", "¡Música!"), H("My family!", "¡Mi familia!"), H("My job!", "¡Mi trabajo!")];
-  if (low.startsWith("where")) return [H("At home!", "¡En casa!"), H("In my city!", "¡En mi ciudad!"), H("At work!", "¡En el trabajo!")];
-  if (low.startsWith("when")) return [H("Today!", "¡Hoy!"), H("Yesterday!", "¡Ayer!"), H("On weekends!", "¡Los fines de semana!")];
-  if (low.startsWith("who")) return [H("My family!", "¡Mi familia!"), H("My friends!", "¡Mis amigos!"), H("Me!", "¡Yo!")];
-  const m = low.match(/^(is|are|am|do|does|did|can|will|would)\b/);
-  if (m) {
-    const a = m[1];
-    const yes: Record<string, [string, string]> = { is: ["Yes, it is!", "¡Sí, así es!"], are: ["Yes, I am!", "¡Sí!"], am: ["Yes, I am!", "¡Sí!"], do: ["Yes, I do!", "¡Sí!"], does: ["Yes, it does!", "¡Sí!"], did: ["Yes, I did!", "¡Sí!"], can: ["Yes, I can!", "¡Sí, puedo!"], will: ["Yes, I will!", "¡Sí, lo haré!"], would: ["Yes, I would!", "¡Sí, lo haría!"] };
-    const no: Record<string, [string, string]> = { is: ["No, it is not!", "¡No, no es así!"], are: ["No, I am not!", "¡No!"], am: ["No, I am not!", "¡No!"], do: ["No, I do not!", "¡No!"], does: ["No, it does not!", "¡No!"], did: ["No, I did not!", "¡No!"], can: ["No, I cannot!", "¡No, no puedo!"], will: ["No, I will not!", "¡No, no lo haré!"], would: ["No, I would not!", "¡No, no lo haría!"] };
-    const y = yes[a] || ["Yes!", "¡Sí!"];
-    const n = no[a] || ["No!", "¡No!"];
-    return [H(y[0], y[1]), H(n[0], n[1]), H("Sometimes!", "¡A veces!")];
+  const out: { en: string; es: string }[] = [];
+  if (t.includes("pizza") || t.includes("food") || t.includes("eat") || t.includes("hungry")) {
+    out.push(H("I love pizza too!", "¡A mí también me encanta la pizza!"));
+    out.push(H("What is your favorite food?", "¿Cuál es tu comida favorita?"));
+    out.push(H("I prefer pasta.", "Prefiero la pasta."));
+  } else if (t.includes("music") || t.includes("song") || t.includes("sing")) {
+    out.push(H("I love rock music!", "¡Me encanta el rock!"));
+    out.push(H("Who is your favorite singer?", "¿Quién es tu cantante favorito?"));
+    out.push(H("I listen to music every day.", "Escucho música todos los días."));
+  } else if (t.includes("travel") || t.includes("trip") || t.includes("visit")) {
+    out.push(H("I want to visit Europe!", "¡Quiero visitar Europa!"));
+    out.push(H("Where did you go?", "¿A dónde fuiste?"));
+    out.push(H("I love traveling!", "¡Me encanta viajar!"));
+  } else if (t.includes("movie") || t.includes("film") || t.includes("watch")) {
+    out.push(H("I like action movies!", "¡Me gustan las películas de acción!"));
+    out.push(H("What is your favorite movie?", "¿Cuál es tu película favorita?"));
+    out.push(H("I watched it yesterday.", "La vi ayer."));
+  } else if (t.includes("family") || t.includes("brother") || t.includes("sister") || t.includes("mother") || t.includes("father")) {
+    out.push(H("I have two brothers.", "Tengo dos hermanos."));
+    out.push(H("My family is small.", "Mi familia es pequeña."));
+    out.push(H("Tell me about your family!", "¡Cuéntame de tu familia!"));
+  } else if (t.includes("job") || t.includes("work") || t.includes("teacher") || t.includes("teach")) {
+    out.push(H("I am a teacher.", "Soy maestro."));
+    out.push(H("I work from home.", "Trabajo desde casa."));
+    out.push(H("What do you do?", "¿A qué te dedicas?"));
+  } else if (t.includes("tired") || t.includes("sleep") || t.includes("busy")) {
+    out.push(H("I had a long day.", "Tuve un día largo."));
+    out.push(H("I need some rest.", "Necesito descansar."));
+    out.push(H("But I feel better now!", "¡Pero ya me siento mejor!"));
+  } else if (t.includes("sport") || t.includes("play") || t.includes("game")) {
+    out.push(H("I play soccer!", "¡Juego fútbol!"));
+    out.push(H("What is your favorite sport?", "¿Cuál es tu deporte favorito?"));
+    out.push(H("I like watching games.", "Me gusta ver partidos."));
+  } else if (t.endsWith("?")) {
+    const m = t.match(/^(is|are|am|do|does|did|can|will)\b/);
+    if (m) {
+      const a = m[1];
+      const yesMap: Record<string,string> = { is:"Yes, it is!", are:"Yes, I am!", am:"Yes, I am!", do:"Yes, I do!", does:"Yes, it does!", did:"Yes, I did!", can:"Yes, I can!", will:"Yes, I will!" };
+      const noMap: Record<string,string>  = { is:"No, it is not!", are:"No, I am not!", am:"No, I am not!", do:"No, I do not!", does:"No, it does not!", did:"No, I did not!", can:"No, I cannot!", will:"No, I will not!" };
+      out.push(H(yesMap[a] || "Yes!", "¡Sí!"));
+      out.push(H(noMap[a] || "No!", "¡No!"));
+      out.push(H("Sometimes!", "¡A veces!"));
+    }
   }
-  return [H("Yes!", "¡Sí!"), H("No!", "¡No!"), H("Tell me more!", "¡Cuéntame más!")];
+  if (out.length === 0) {
+    out.push(H("Tell me more!", "¡Cuéntame más!"));
+    out.push(H("That is interesting!", "¡Eso es interesante!"));
+    out.push(H("Why do you think that?", "¿Por qué piensas eso?"));
+  }
+  return out.slice(0, 4);
 }
 
 function playTransition() {
@@ -367,7 +399,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         historyReadyRef.current = true;
         setPhase("conversation");
       setReplyHints(buildReplyHints(data.reply));
-        setReplyHints(buildReplyHints(data.reply));
     if (!opts?.silent) {
           speakFriend(data.reply);
         }
@@ -950,6 +981,23 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           </div>
         )}
         <div ref={listEndRef} />
+    {replyHints.length > 0 && (
+      <div className="flex flex-wrap items-start gap-2 px-3 pb-2">
+        <span className="text-[10px] text-[#849495] font-code uppercase tracking-widest w-full">💡 Toca para escuchar, luego dilo tú 🎤</span>
+        {replyHints.map((h, idx) => (
+          <button
+            key={idx}
+            onClick={() => speakFriend(h.en)}
+            disabled={isSpeaking}
+            className="ft-chip whitespace-normal !border-[#00ff88]/40 !text-[#9ff5c8] text-left"
+            title="Escuchar pronunciación"
+          >
+            <span className="block text-[11px]">🔊 {h.en}</span>
+            <span className="block text-[9px] opacity-70">🇪🇸 {h.es}</span>
+          </button>
+        ))}
+      </div>
+    )}
       </div>
       <div className="flex gap-2 overflow-x-auto ft-scroll pb-1">
         {SUGGESTIONS.map((s) => (
@@ -1014,15 +1062,9 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     console.log("[ConversationChat] boot v3 → returning:", returning);
 
     if (returning && savedName) {
-      const greet: FreeTalkTurn = {
-        role: "assistant",
-        text: "Welcome back, " + savedName + "! How are you today?",
-        spanish: "¡Bienvenido de nuevo, " + savedName + "! ¿Cómo estás hoy?",
-      };
-      setMessages([...savedHistory, greet]);
+      setMessages(savedHistory);
       historyReadyRef.current = savedHistory.length > 0;
-      setPhase("conversation");
-      pendingGreetRef.current = greet.text;
+      setPhase("resume");
     } else {
       setObStep(0);
       setPhase("onboarding");
@@ -1171,6 +1213,8 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     </div>
   );
 };
+
+
 
 
 
