@@ -466,7 +466,16 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     }
     freeTalkStore.setSummary(s.en, s.es);
     try {
-      const uidSum = localStorage.getItem("aurix_cloud_user") || "";
+      let uidSum = localStorage.getItem("aurix_cloud_user") || "";
+      if (!uidSum) {
+        const nm = (nickname || "").trim();
+        const known = cloudUsers.find((u) => u.nickname.toLowerCase() === nm.toLowerCase());
+        uidSum = known ? known.id : "U-" + Date.now();
+        localStorage.setItem("aurix_cloud_user", uidSum);
+        try {
+          fetch(CLOUD_API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "sync", user_id: uidSum, state: { nickname: nm } }) }).catch(() => {});
+        } catch (e2) {}
+      }
       if (uidSum) {
         fetch(CLOUD_API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "saveSummary", user_id: uidSum, summary_en: s.en, summary_es: s.es }) }).catch(() => {});
       }
@@ -1162,6 +1171,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     </div>
   );
 };
+
 
 
 
