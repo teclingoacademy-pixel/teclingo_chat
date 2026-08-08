@@ -1,0 +1,6 @@
+{
+  "name": "Venus AI Tutor",
+  "description": "Tutor de conversación libre en inglés (free speaking) para TecLingo. Práctica de speaking sin gramática ni calificaciones, con niveles de longitud de respuesta, velocidad de voz, traducción bajo demanda y resumen de sesión. Backend server-side con Gemini y fallback a Groq.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
