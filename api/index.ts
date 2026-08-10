@@ -92,10 +92,50 @@ function truncateToMax(text: string, max: number): string {
   return out;
 }
 
-// --- GROQ BACKUP AI (OpenAI-compatible endpoint, used if Gemini fails) ---
+// --- OpenAI-compatible endpoints (Groq backup + OmniRoute multi-provider router) ---
+
+const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
+const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "llama-3.1-8b-instant";
+
+async function callOpenAICompatible(opts: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  system: string;
+  user: string;
+  json?: boolean;
+  temperature?: number;
+  label?: string;
+}): Promise<string> {
+  const res = await fetch(`${opts.baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${opts.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      messages: [
+        { role: "system", content: opts.system },
+        { role: "user", content: opts.user },
+      ],
+      temperature: opts.temperature ?? 0.7,
+      ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`${opts.label || "API"} error ${res.status}: ${await res.text()}`);
+  }
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content || "";
+  if (!content) {
+    throw new Error(`${opts.label || "API"} returned an empty response.`);
+  }
+  return content;
+}
 
 async function callGroq(opts: {
   system: string;
@@ -107,31 +147,34 @@ async function callGroq(opts: {
   if (!apiKey) {
     throw new Error("GROQ_API_KEY environment variable is missing.");
   }
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
-      ],
-      temperature: opts.temperature ?? 0.7,
-      ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-    }),
+  return callOpenAICompatible({
+    baseUrl: "https://api.groq.com/openai",
+    apiKey,
+    model: GROQ_MODEL,
+    label: "Groq API",
+    ...opts,
   });
-  if (!res.ok) {
-    throw new Error(`Groq API error ${res.status}: ${await res.text()}`);
+}
+
+async function callOmniRoute(opts: {
+  system: string;
+  user: string;
+  temperature?: number;
+}): Promise<string> {
+  const apiKey = process.env.OMNIROUTE_API_KEY;
+  if (!apiKey) {
+    throw new Error("OMNIROUTE_API_KEY environment variable is missing.");
   }
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content || "";
-  if (!content) {
-    throw new Error("Groq returned an empty response.");
-  }
-  return content;
+  // No response_format: OmniRoute enruta a 291 proveedores con auto-fallback,
+  // y no todos aceptan response_format json_object. El prompt pide JSON y
+  // parseReply tolera texto plano.
+  return callOpenAICompatible({
+    baseUrl: OMNIROUTE_BASE_URL,
+    apiKey,
+    model: OMNIROUTE_MODEL,
+    label: "OmniRoute API",
+    ...opts,
+  });
 }
 
 const REPLY_SCHEMA = {
@@ -225,6 +268,24 @@ async function generateFriendReply(opts: {
     };
   };
 
+  // 0) Primary: OmniRoute (multi-provider router, env-configurable)
+  if (process.env.OMNIROUTE_API_KEY) {
+    try {
+      const historyText = opts.history
+        .slice(-6)
+        .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
+        .join("\n");
+      const raw = await callOmniRoute({
+        system: instruction + strict,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+        temperature: 0.7,
+      });
+      return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
+    } catch (err: any) {
+      console.warn("[FreeTalk] OmniRoute failed, switching to Gemini:", err?.message || err);
+    }
+  }
+
   // 1) Primary: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
@@ -274,6 +335,21 @@ async function generateFriendReply(opts: {
 }
 
 async function translateToSpanish(text: string): Promise<string> {
+  // 0) Primary: OmniRoute
+  if (process.env.OMNIROUTE_API_KEY) {
+    try {
+      const out = await callOmniRoute({
+        system: "You are a warm, natural translator into Latin American Spanish.",
+        user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
+        temperature: 0.2,
+      });
+      const trimmed = out.trim();
+      if (trimmed) return trimmed;
+    } catch (err: any) {
+      console.warn("[FreeTalk] OmniRoute translate failed, switching to Gemini:", err?.message || err);
+    }
+  }
+
   // 1) Primary: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
@@ -456,6 +532,25 @@ app.post("/api/tutor/summarize", async (req, res) => {
       };
     };
 
+    // 0) Primary: OmniRoute
+    if (process.env.OMNIROUTE_API_KEY) {
+      try {
+        const conversation = (history || [])
+          .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
+          .join("\n");
+        const raw = await callOmniRoute({
+          system: "You write warm, concise session summaries for an English learning app.",
+          user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
+          temperature: 0.4,
+        });
+        const s = parseSummary(raw);
+        res.json({ ...s, status: "success", model: `omniroute/${OMNIROUTE_MODEL}` });
+        return;
+      } catch (err: any) {
+        console.warn("[Summarize] OmniRoute failed, switching to Gemini:", err?.message || err);
+      }
+    }
+
     // 1) Primary: Gemini
     if (process.env.GEMINI_API_KEY) {
       try {
@@ -519,6 +614,7 @@ app.get("/api/health", (_req, res) => {
     core: "SYNTHETIC_INTELLIGENCE_V4.8",
     timestamp: new Date().toISOString(),
     apiKeyAvailable: Boolean(process.env.GEMINI_API_KEY),
+    omniRouteKeyAvailable: Boolean(process.env.OMNIROUTE_API_KEY),
   });
 });
 

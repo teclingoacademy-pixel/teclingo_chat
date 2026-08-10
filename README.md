@@ -12,12 +12,12 @@ un amigo virtual que se adapta al nivel del estudiante.
 - **Reconocimiento de voz** (Web Speech API) y entrada por teclado.
 - **Botón de pánico**: revela la traducción al español de cada respuesta cuando el estudiante la pide.
 - **Resumen de sesión** (EN/ES) guardado en `localStorage` y leído por el narrador en la próxima visita.
-- Backend con **Gemini** como motor principal y **Groq** como fallback automático.
+- Backend con **OmniRoute** como router principal (multi-proveedor con auto-fallback), **Gemini** como motor secundario y **Groq** como respaldo final.
 
 ## Stack
 
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS 4.
-- **Backend**: Express (server-side), `@google/genai`, fallback OpenAI-compatible a Groq.
+- **Backend**: Express (server-side), router OpenAI-compatible `@google/genai`, fallback a Groq y OmniRoute.
 - **Deploy**: Vercel (frontend estático + función serverless `api/index.ts`).
 
 ## Requisitos
@@ -38,8 +38,11 @@ Abre `http://localhost:3000`.
 
 | Variable | Requerida | Descripción |
 |---|---|---|
-| `GEMINI_API_KEY` | Sí | Clave de la API de Gemini (motor principal). |
+| `GEMINI_API_KEY` | Sí | Clave de la API de Gemini (motor secundario). |
 | `GROQ_API_KEY` | No | Fallback si Gemini falla (modelo `llama-3.1-8b-instant`). |
+| `OMNIROUTE_API_KEY` | No | Router principal (si se define): 291 proveedores + auto-fallback + tiers gratis. |
+| `OMNIROUTE_BASE_URL` | No | Dónde corre OmniRoute (default: VPS `http://192.168.0.15:20128`). |
+| `OMNIROUTE_MODEL` | No | Modelo que resuelve OmniRoute (default: `gpt-4o-mini`). |
 
 ## Scripts
 
