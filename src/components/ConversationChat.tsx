@@ -210,6 +210,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [narratorBusy, setNarratorBusy] = useState(false);
   const [panicOn, setPanicOn] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [listening, setListening] = useState(false);
@@ -226,6 +227,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const pendingGreetRef = useRef<string>("");
   const lastSummaryRef = useRef<string>("");
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const speechTimerRef = useRef<any>(null);
   const messagesRef = useRef<FreeTalkTurn[]>([]);
   const historyReadyRef = useRef(false);
   const listEndRef = useRef<HTMLDivElement | null>(null);
@@ -241,19 +243,30 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [messages, phase, isProcessing]);
 
   const stopSpeaking = useCallback(() => {
+    if (speechTimerRef.current) {
+      clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     speechRef.current = null;
     setIsSpeaking(false);
+    setNarratorBusy(false);
   }, []);
 
   const speakNow = useCallback(
     (text: string, lang: string, rate: number) => {
-      if (!("speechSynthesis" in window)) return;
+      if (!("speechSynthesis" in window)) {
+        setNarratorBusy(false);
+        return;
+      }
       window.speechSynthesis.cancel();
       const clean = cleanTTS(text);
-      if (!clean) return;
+      if (!clean) {
+        setNarratorBusy(false);
+        return;
+      }
       const u = new SpeechSynthesisUtterance(clean);
       u.lang = lang;
       u.rate = rate;
@@ -264,9 +277,28 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         u.lang = picked.lang;
       }
       console.log("[TTS] voz:", picked ? picked.name : "default del sistema");
-      u.onstart = () => setIsSpeaking(true);
-      u.onend = () => setIsSpeaking(false);
-      u.onerror = () => setIsSpeaking(false);
+      const fallbackMs = Math.min(30000, Math.max(2000, Math.ceil(clean.length / 14) * 1000));
+      speechTimerRef.current = setTimeout(() => setNarratorBusy(false), fallbackMs);
+      u.onstart = () => {
+        setIsSpeaking(true);
+        setNarratorBusy(true);
+      };
+      u.onend = () => {
+        setIsSpeaking(false);
+        setNarratorBusy(false);
+        if (speechTimerRef.current) {
+          clearTimeout(speechTimerRef.current);
+          speechTimerRef.current = null;
+        }
+      };
+      u.onerror = () => {
+        setIsSpeaking(false);
+        setNarratorBusy(false);
+        if (speechTimerRef.current) {
+          clearTimeout(speechTimerRef.current);
+          speechTimerRef.current = null;
+        }
+      };
       speechRef.current = u;
       window.speechSynthesis.speak(u);
     },
@@ -274,7 +306,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   );
 
   const speakNarrator = useCallback(
-    (text: string) => speakNow(text, "es-MX", 0.95),
+    (text: string) => {
+      setNarratorBusy(true);
+      speakNow(text, "es-MX", 0.95);
+    },
     [speakNow]
   );
 
@@ -424,6 +459,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [sendMessage]);
 
   const startFirstMessage = useCallback(async () => {
+    if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
     playTransition();
     setMessages([]);
     historyReadyRef.current = false;
@@ -433,7 +469,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     if (first) {
       speakFriend(first.text);
     }
-  }, [sendMessage, speakFriend]);
+  }, [sendMessage, speakFriend, phase, narratorBusy]);
 
   useEffect(() => {
     if (phase === "onboarding") {
@@ -458,6 +494,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         );
       }
     } else if (phase === "resume") {
+      setNarratorBusy(true);
       const s = freeTalkStore.getSummary();
       const saved = freeTalkStore.loadHistory();
       setMessages(saved);
@@ -573,6 +610,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   };
 
   const sayKickoff = () => {
+    if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
     const rec = ensureRecognition();
     if (!rec) {
       startFirstMessage();
@@ -580,6 +618,9 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     }
     toggleListening();
   };
+
+  const isProtocolBlocked =
+    (phase === "onboarding" || phase === "resume") && narratorBusy;
 
   const kickoff = (
     <div className="flex flex-col items-center gap-4 text-center">
@@ -590,10 +631,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         "{buildKickoff(nickname)}"
       </p>
       <div className="flex gap-3">
-        <button onClick={sayKickoff} className="ft-btn-primary flex items-center gap-2">
+        <button onClick={sayKickoff} disabled={isProtocolBlocked} className="ft-btn-primary flex items-center gap-2">
           <Mic className="w-4 h-4" /> Decirla
         </button>
-        <button onClick={startFirstMessage} className="ft-btn-secondary flex items-center gap-2">
+        <button onClick={startFirstMessage} disabled={isProtocolBlocked} className="ft-btn-secondary flex items-center gap-2">
           <Play className="w-4 h-4" /> Enviarla
         </button>
       </div>
@@ -621,6 +662,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
                     setNickname(u.nickname);
                     setObStep(1);
                   }}
+                  disabled={isProtocolBlocked}
                   className="ft-pill"
                 >
                   👤 {u.nickname}
@@ -649,6 +691,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
               freeTalkStore.setNickname(name);
               setObStep(1);
             }}
+            disabled={isProtocolBlocked}
             className="ft-btn-primary"
           >
             Continuar
@@ -680,7 +723,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
               están ocultas hasta que tú las pidas.
             </p>
           </div>
-          <button onClick={() => setObStep(2)} className="ft-btn-primary">
+          <button onClick={() => setObStep(2)} disabled={isProtocolBlocked} className="ft-btn-primary">
             Continuar
           </button>
         </div>
@@ -693,7 +736,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           <h2 className="text-xl font-geist font-bold text-white">Prueba de micrófono</h2>
           <p className="text-sm text-[#849495]">El micrófono es el corazón de esta experiencia. Vamos a probarlo.</p>
           {micStatus === "idle" || micStatus === "testing" ? (
-            <button onClick={runMicTest} disabled={micStatus === "testing"} className="ft-btn-primary flex items-center justify-center gap-2">
+            <button onClick={runMicTest} disabled={micStatus === "testing" || isProtocolBlocked} className="ft-btn-primary flex items-center justify-center gap-2">
               {micStatus === "testing" ? <ShieldAlert className="w-4 h-4 animate-pulse" /> : <Mic className="w-4 h-4" />}
               {micStatus === "testing" ? "Probando..." : "Probar micrófono"}
             </button>
@@ -715,16 +758,16 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           )}
           {micStatus === "fail" && (
             <div className="flex gap-3">
-              <button onClick={() => setPhase("finished")} className="ft-btn-secondary flex-1">
+              <button onClick={() => setPhase("finished")} disabled={isProtocolBlocked} className="ft-btn-secondary flex-1">
                 Salir
               </button>
-              <button onClick={() => setObStep(3)} className="ft-btn-primary flex-1">
+              <button onClick={() => setObStep(3)} disabled={isProtocolBlocked} className="ft-btn-primary flex-1">
                 Continuar sin micrófono
               </button>
             </div>
           )}
           {canContinue && (
-            <button onClick={() => setObStep(3)} className="ft-btn-primary">
+            <button onClick={() => setObStep(3)} disabled={isProtocolBlocked} className="ft-btn-primary">
               Continuar
             </button>
           )}
@@ -771,6 +814,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
               freeTalkStore.markReady();
               setObStep(4);
             }}
+            disabled={isProtocolBlocked}
             className="ft-btn-primary"
           >
             Continuar
@@ -795,6 +839,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         <MicOrb
           state={listening ? "listening" : micStatus === "testing" ? "processing" : "idle"}
           onClick={() => {
+            if (isProtocolBlocked) return;
             if (obStep === 2 && micStatus !== "testing") runMicTest();
             else if (obStep === 4) sayKickoff();
           }}
@@ -1143,6 +1188,25 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     };
   }, []);
 
+  const [endVisible, setEndVisible] = useState(true);
+  const endTimerRef = useRef<any>(null);
+
+  const showEndBtn = useCallback(() => {
+    setEndVisible(true);
+    if (endTimerRef.current) clearTimeout(endTimerRef.current);
+    endTimerRef.current = setTimeout(() => setEndVisible(false), 6000);
+  }, []);
+
+  useEffect(() => {
+    if (phase === "conversation") showEndBtn();
+  }, [phase, showEndBtn]);
+
+  useEffect(() => {
+    return () => {
+      if (endTimerRef.current) clearTimeout(endTimerRef.current);
+    };
+  }, []);
+
   const headerLabel =
     phase === "conversation"
       ? "CONVERSACIÓN LIBRE · INGLÉS"
@@ -1161,14 +1225,36 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse" />
       <h1 className="font-geist font-bold text-[10px] md:text-xs tracking-widest uppercase">{headerLabel}</h1>
     </div>
-    <button
-      onClick={() => setDrawerOpen(true)}
-      className="ft-pill !px-2.5 !py-1.5 text-sm pointer-events-auto"
-      title="Menú"
-    >
-      ⋮
-    </button>
+    <div className="flex items-center gap-2">
+      {phase === "conversation" && endVisible && (
+        <button
+          onClick={() => { setDrawerOpen(false); finishSession(); }}
+          disabled={finishing}
+          className="ft-pill !px-2.5 !py-1.5 text-[11px] pointer-events-auto"
+          title="Terminar conversación"
+        >
+          {finishing ? "⏳ Guardando..." : "⏹ Terminar"}
+        </button>
+      )}
+      <button
+        onClick={() => setDrawerOpen(true)}
+        className="ft-pill !px-2.5 !py-1.5 text-sm pointer-events-auto"
+        title="Menú"
+      >
+        ⋮
+      </button>
+    </div>
   </div>
+
+  {phase === "conversation" && !endVisible && !finishing && (
+    <button
+      onClick={showEndBtn}
+      className="fixed top-2 right-16 z-30 ft-pill !px-2 !py-1.5 text-[11px] opacity-50 hover:opacity-100 transition-opacity"
+      title="Mostrar botón de terminar conversación"
+    >
+      ⏹
+    </button>
+  )}
 
   {drawerOpen && (
     <div className="fixed inset-0 z-50" onClick={() => setDrawerOpen(false)}>

@@ -181,6 +181,14 @@
   border-color: rgba(0, 240, 255, 0.4);
   color: #e5e2e1;
 }
+.ft-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ft-pill:disabled:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #c1c7cf;
+}
 .ft-pill-active {
   background: rgba(0, 240, 255, 0.15);
   border-color: rgba(0, 240, 255, 0.6);
