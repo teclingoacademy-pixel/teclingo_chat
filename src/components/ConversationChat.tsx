@@ -13,6 +13,7 @@ import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, RotateCcw, X, Spar
 
 type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
 const CLOUD_API = "https://script.google.com/macros/s/AKfycbw0VN6XVNz_qdEx6zmAI5YMTPQG7acYcssVqBC4q5WO0vjbXV0H8oHqfbUZWURhIHhE/exec";
+const MAIN_APP_URL = "https://aurix-ver1-teclingo.vercel.app/";
 
 function buildKickoff(_name: string): string { return "Hello, AURIX!"; }
 
@@ -1281,6 +1282,12 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           <button onClick={() => { setDrawerOpen(false); finishSession(); }} disabled={finishing} className="ft-pill !py-2 text-[11px]">⏹ {finishing ? "Guardando..." : "Terminar conversación"}</button>
         )}
         <button onClick={() => { setDrawerOpen(false); handleResetApp(); }} className="ft-pill !py-2 text-[11px] hover:border-red-500/60 hover:text-red-300">🗑 Reiniciar protocolo</button>
+        <button
+          onClick={() => { stopSpeaking(); window.location.href = MAIN_APP_URL; }}
+          className="ft-pill !py-2 text-[11px] hover:border-[#00f0ff]/60 hover:text-[#7df4ff]"
+        >
+          🏠 Volver a la app principal
+        </button>
         {onExit && (
           <button onClick={onExit} className="ft-pill !py-2 text-[11px]">🚪 Salir</button>
         )}
