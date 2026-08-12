@@ -268,7 +268,26 @@ async function generateFriendReply(opts: {
     };
   };
 
-  // 0) Primary: OmniRoute (multi-provider router, env-configurable)
+  // 0) PRIMARY: Groq (OpenAI-compatible) — low latency
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const historyText = opts.history
+        .slice(-6)
+        .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
+        .join("\n");
+      const raw = await callGroq({
+        system: instruction + strict,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+        json: true,
+        temperature: 0.7,
+      });
+      return { ...parseReply(raw), model: GROQ_MODEL };
+    } catch (err: any) {
+      console.warn("[FreeTalk] Groq failed, switching to OmniRoute:", err?.message || err);
+    }
+  }
+
+  // 1) Backup: OmniRoute (multi-provider router, env-configurable)
   if (process.env.OMNIROUTE_API_KEY) {
     try {
       const historyText = opts.history
@@ -286,7 +305,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  // 1) Primary: Gemini
+  // 2) Backup: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
       const ai = getAiClient();
@@ -308,26 +327,7 @@ async function generateFriendReply(opts: {
       });
       return { ...parseReply(response.text || ""), model: "gemini-3.6-flash" };
     } catch (err: any) {
-      console.warn("[FreeTalk] Gemini failed, switching to Groq:", err?.message || err);
-    }
-  }
-
-  // 2) Backup: Groq (OpenAI-compatible)
-  if (process.env.GROQ_API_KEY) {
-    try {
-      const historyText = opts.history
-        .slice(-6)
-        .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
-        .join("\n");
-      const raw = await callGroq({
-        system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
-        json: true,
-        temperature: 0.7,
-      });
-      return { ...parseReply(raw), model: GROQ_MODEL };
-    } catch (err: any) {
-      console.warn("[FreeTalk] Groq fallback failed:", err?.message || err);
+      console.warn("[FreeTalk] Gemini fallback failed:", err?.message || err);
     }
   }
 
@@ -335,7 +335,21 @@ async function generateFriendReply(opts: {
 }
 
 async function translateToSpanish(text: string): Promise<string> {
-  // 0) Primary: OmniRoute
+  // 0) PRIMARY: Groq
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const out = await callGroq({
+        system: "You are a warm, natural translator into Latin American Spanish.",
+        user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
+        temperature: 0.2,
+      });
+      return out.trim();
+    } catch (err: any) {
+      console.warn("[FreeTalk] Groq translate failed, switching to OmniRoute:", err?.message || err);
+    }
+  }
+
+  // 1) Backup: OmniRoute
   if (process.env.OMNIROUTE_API_KEY) {
     try {
       const out = await callOmniRoute({
@@ -350,7 +364,7 @@ async function translateToSpanish(text: string): Promise<string> {
     }
   }
 
-  // 1) Primary: Gemini
+  // 2) Backup: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
       const ai = getAiClient();
@@ -362,21 +376,7 @@ async function translateToSpanish(text: string): Promise<string> {
       const out = (r.text || "").trim();
       if (out) return out;
     } catch (err: any) {
-      console.warn("[FreeTalk] Gemini translate failed, switching to Groq:", err?.message || err);
-    }
-  }
-
-  // 2) Backup: Groq
-  if (process.env.GROQ_API_KEY) {
-    try {
-      const out = await callGroq({
-        system: "You are a warm, natural translator into Latin American Spanish.",
-        user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
-        temperature: 0.2,
-      });
-      return out.trim();
-    } catch (err: any) {
-      console.warn("[FreeTalk] Groq translate fallback failed:", err?.message || err);
+      console.warn("[FreeTalk] Gemini translate fallback failed:", err?.message || err);
     }
   }
 
@@ -532,7 +532,27 @@ app.post("/api/tutor/summarize", async (req, res) => {
       };
     };
 
-    // 0) Primary: OmniRoute
+    // 0) PRIMARY: Groq
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const conversation = (history || [])
+          .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
+          .join("\n");
+        const raw = await callGroq({
+          system: "You write warm, concise session summaries for an English learning app.",
+          user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
+          json: true,
+          temperature: 0.4,
+        });
+        const s = parseSummary(raw);
+        res.json({ ...s, status: "success", model: GROQ_MODEL });
+        return;
+      } catch (err: any) {
+        console.warn("[Summarize] Groq failed, switching to OmniRoute:", err?.message || err);
+      }
+    }
+
+    // 1) Backup: OmniRoute
     if (process.env.OMNIROUTE_API_KEY) {
       try {
         const conversation = (history || [])
@@ -551,7 +571,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
       }
     }
 
-    // 1) Primary: Gemini
+    // 2) Backup: Gemini
     if (process.env.GEMINI_API_KEY) {
       try {
         const ai = getAiClient();
@@ -571,27 +591,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
         res.json({ ...s, status: "success", model: "gemini-3.6-flash" });
         return;
       } catch (err: any) {
-        console.warn("[Summarize] Gemini failed, switching to Groq:", err?.message || err);
-      }
-    }
-
-    // 2) Backup: Groq
-    if (process.env.GROQ_API_KEY) {
-      try {
-        const conversation = (history || [])
-          .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
-          .join("\n");
-        const raw = await callGroq({
-          system: "You write warm, concise session summaries for an English learning app.",
-          user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
-          json: true,
-          temperature: 0.4,
-        });
-        const s = parseSummary(raw);
-        res.json({ ...s, status: "success", model: GROQ_MODEL });
-        return;
-      } catch (err: any) {
-        console.warn("[Summarize] Groq fallback failed:", err?.message || err);
+        console.warn("[Summarize] Gemini fallback failed:", err?.message || err);
       }
     }
 

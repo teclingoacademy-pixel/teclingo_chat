@@ -12,7 +12,7 @@ un amigo virtual que se adapta al nivel del estudiante.
 - **Reconocimiento de voz** (Web Speech API) y entrada por teclado.
 - **Botón de pánico**: revela la traducción al español de cada respuesta cuando el estudiante la pide.
 - **Resumen de sesión** (EN/ES) guardado en `localStorage` y leído por el narrador en la próxima visita.
-- Backend con **OmniRoute** como router principal (multi-proveedor con auto-fallback), **Gemini** como motor secundario y **Groq** como respaldo final.
+- Backend con **Groq** como proveedor principal (baja latencia), **OmniRoute** como respaldo (router multi-proveedor con auto-fallback) y **Gemini** como último motor disponible.
 
 ## Stack
 
@@ -38,9 +38,9 @@ Abre `http://localhost:3000`.
 
 | Variable | Requerida | Descripción |
 |---|---|---|
-| `GEMINI_API_KEY` | Sí | Clave de la API de Gemini (motor secundario). |
-| `GROQ_API_KEY` | No | Fallback si Gemini falla (modelo `llama-3.1-8b-instant`). |
-| `OMNIROUTE_API_KEY` | No | Router principal (si se define): 291 proveedores + auto-fallback + tiers gratis. |
+| `GROQ_API_KEY` | Sí* | Proveedor principal de conversación (modelo `llama-3.1-8b-instant`). *Sin ella, el chat usa fallbacks. |
+| `GEMINI_API_KEY` | No | Clave de la API de Gemini (último respaldo). |
+| `OMNIROUTE_API_KEY` | No | Router secundario (si se define): 291 proveedores + auto-fallback + tiers gratis. |
 | `OMNIROUTE_BASE_URL` | No | Dónde corre OmniRoute (default: VPS `http://192.168.0.15:20128`). |
 | `OMNIROUTE_MODEL` | No | Modelo que resuelve OmniRoute (default: `gpt-4o-mini`). |
 
@@ -58,7 +58,7 @@ npm run clean        # Elimina dist/
 ## Despliegue en Vercel
 
 1. Crea el proyecto en Vercel (framework preseleccionado: Vite).
-2. Configura las variables de entorno `GEMINI_API_KEY` y `GROQ_API_KEY` en *Settings → Environment Variables*.
+2. Configura las variables de entorno `GROQ_API_KEY`, `GEMINI_API_KEY` y `OMNIROUTE_API_KEY` en *Settings → Environment Variables*.
 3. `vercel.json` enruta `/api/*` a la función serverless y el resto al SPA.
 4. Deploy (`git push` al repo importado o `vercel --prod`).
 
