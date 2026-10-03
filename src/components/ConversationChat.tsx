@@ -9,6 +9,7 @@ import {
   FreeTalkTurn,
   STORAGE_VERSION,
 } from "../services/freeTalkService";
+import * as Identity from "../services/identityService";
 import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, RotateCcw, X, Sparkles } from "lucide-react";
 
 type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
@@ -222,6 +223,17 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [summary, setSummary] = useState<{ en: string; es: string }>({ en: "", es: "" });
   const [cloudUsers, setCloudUsers] = useState<{ id: string; nickname: string }[]>([]);
   const [cloudTick, setCloudTick] = useState(0);
+
+  // Lake login state
+  const [lakeLoginVisible, setLakeLoginVisible] = useState(false);
+  const [lakeTab, setLakeTab] = useState<"login" | "register">("login");
+  const [lakeEmail, setLakeEmail] = useState("");
+  const [lakeName, setLakeName] = useState("");
+  const [lakePassword, setLakePassword] = useState("");
+  const [lakePassword2, setLakePassword2] = useState("");
+  const [lakeError, setLakeError] = useState("");
+  const [lakeLoading, setLakeLoading] = useState(false);
+  const [lakeEmailReady, setLakeEmailReady] = useState(false);
 
   const recognitionRef = useRef<any>(null);
   const sendMessageRef = useRef<any>(null);
@@ -459,18 +471,27 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     sendMessageRef.current = sendMessage;
   }, [sendMessage]);
 
-  const startFirstMessage = useCallback(async () => {
-    if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
-    playTransition();
-    setMessages([]);
-    historyReadyRef.current = false;
-    setPhase("conversation");
-    await sendMessage(buildKickoff(nickname), { asStart: true, silent: true });
-    const first = messagesRef.current[0];
-    if (first) {
-      speakFriend(first.text);
-    }
-  }, [sendMessage, speakFriend, phase, narratorBusy]);
+  const startFirstMessage = useCallback(
+    async (bypassAuth: boolean = false) => {
+      if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
+      const shouldBypass = bypassAuth === true;
+      if (!shouldBypass && !lakeEmailReady && !Identity.isLoggedIn()) {
+        setLakeLoginVisible(true);
+        return;
+      }
+      playTransition();
+      setMessages([]);
+      historyReadyRef.current = false;
+      setPhase("conversation");
+      logActividadGlobalToLake(Identity.getEmail() || nickname, "conversation", "started", nickname);
+      await sendMessage(buildKickoff(nickname), { asStart: true, silent: true });
+      const first = messagesRef.current[0];
+      if (first) {
+        speakFriend(first.text);
+      }
+    },
+    [sendMessage, speakFriend, phase, narratorBusy, lakeEmailReady, nickname]
+  );
 
   useEffect(() => {
     if (phase === "onboarding") {
@@ -554,6 +575,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     setSummary(s);
     setFinishing(false);
     setPhase("finished");
+    logActividadGlobalToLake(Identity.getEmail() || nickname, "conversation", "session_finished", `${messagesRef.current.length} messages`);
     setTimeout(() => {
       speakNarrator(
         "Gracias " +
@@ -612,12 +634,74 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
   const sayKickoff = () => {
     if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
+    if (!lakeEmailReady && !Identity.isLoggedIn()) {
+      setLakeLoginVisible(true);
+      return;
+    }
     const rec = ensureRecognition();
     if (!rec) {
       startFirstMessage();
       return;
     }
     toggleListening();
+  };
+
+  const logActividadGlobalToLake = (email: string, herramienta: string, accion: string, detalle?: string) => {
+    if (email) {
+      Identity.logActividadGlobal(email, herramienta, accion, detalle).catch(() => {});
+    }
+  };
+
+  const handleLakeLogin = async () => {
+    if (lakeLoading) return;
+    setLakeError("");
+    setLakeLoading(true);
+    try {
+      const res = await Identity.doLogin(lakeEmail, lakePassword);
+      if (res.ok) {
+        setLakeEmailReady(true);
+        setLakeLoginVisible(false);
+        logActividadGlobalToLake(lakeEmail, "auth", "login_ok", "email");
+        startFirstMessage(true);
+      } else {
+        setLakeError(res.code === "credenciales_invalidas" ? "Credenciales incorrectas" : "Error al iniciar sesion");
+      }
+    } catch {
+      setLakeError("Error de conexion");
+    } finally {
+      setLakeLoading(false);
+    }
+  };
+
+  const handleLakeRegister = async () => {
+    if (lakeLoading) return;
+    if (lakePassword !== lakePassword2) {
+      setLakeError("Las contrasenas no coinciden");
+      return;
+    }
+    setLakeError("");
+    setLakeLoading(true);
+    try {
+      const res = await Identity.doRegister(lakeEmail, lakeName || nickname, lakePassword, nickname);
+      if (res.ok) {
+        setLakeEmailReady(true);
+        setLakeLoginVisible(false);
+        logActividadGlobalToLake(lakeEmail, "auth", "registro_exitoso", lakeName || nickname);
+        startFirstMessage(true);
+      } else {
+        setLakeError(res.code === "ya_registrado" ? "Este email ya esta registrado" : "Error al registrar");
+      }
+    } catch {
+      setLakeError("Error de conexion");
+    } finally {
+      setLakeLoading(false);
+    }
+  };
+
+  const handleLakeSkip = () => {
+    setLakeEmailReady(true);
+    setLakeLoginVisible(false);
+    startFirstMessage(true);
   };
 
   const isProtocolBlocked =
@@ -635,7 +719,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         <button onClick={sayKickoff} disabled={isProtocolBlocked} className="ft-btn-primary flex items-center gap-2">
           <Mic className="w-4 h-4" /> Decirla
         </button>
-        <button onClick={startFirstMessage} disabled={isProtocolBlocked} className="ft-btn-secondary flex items-center gap-2">
+        <button onClick={() => startFirstMessage()} disabled={isProtocolBlocked} className="ft-btn-secondary flex items-center gap-2">
           <Play className="w-4 h-4" /> Enviarla
         </button>
       </div>
@@ -1107,6 +1191,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
     console.log("[ConversationChat] boot v3 → returning:", returning);
 
+    if (Identity.isLoggedIn()) {
+      setLakeEmailReady(true);
+    }
+
     if (returning && savedName) {
       setMessages(savedHistory);
       historyReadyRef.current = savedHistory.length > 0;
@@ -1303,6 +1391,85 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         {phase === "finished" && renderFinished()}
         {phase === "off" && renderOff()}
       </main>
+      {lakeLoginVisible && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={handleLakeSkip} />
+          <div className="relative z-10 w-full max-w-md bg-[#0e0e0e] border border-[#00f0ff]/20 rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-lg font-geist font-bold text-white mb-4">Conecta tu cuenta</h3>
+            <p className="text-xs text-[#849495] mb-4">
+              Guarda tu progreso y resume de sesion en la nube. Opcional: puedes saltar y usar la app sin cuenta.
+            </p>
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setLakeTab("login")}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                  lakeTab === "login" ? "bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40" : "text-[#849495] border border-white/10"
+                }`}
+              >
+                Tengo cuenta
+              </button>
+              <button
+                onClick={() => setLakeTab("register")}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                  lakeTab === "register" ? "bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40" : "text-[#849495] border border-white/10"
+                }`}
+              >
+                Crear cuenta
+              </button>
+            </div>
+            {lakeTab === "register" && (
+              <input
+                type="text"
+                value={lakeName}
+                onChange={(e) => setLakeName(e.target.value)}
+                placeholder="Tu nombre"
+                className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
+              />
+            )}
+            <input
+              type="email"
+              value={lakeEmail}
+              onChange={(e) => setLakeEmail(e.target.value)}
+              placeholder="Email"
+              className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
+            />
+            <input
+              type="password"
+              value={lakePassword}
+              onChange={(e) => setLakePassword(e.target.value)}
+              placeholder="Contrasena"
+              className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
+            />
+            {lakeTab === "register" && (
+              <input
+                type="password"
+                value={lakePassword2}
+                onChange={(e) => setLakePassword2(e.target.value)}
+                placeholder="Confirmar contrasena"
+                className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
+              />
+            )}
+            {lakeError && (
+              <p className="text-xs text-red-400 mb-3">{lakeError}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={lakeTab === "login" ? handleLakeLogin : handleLakeRegister}
+                disabled={lakeLoading || !lakeEmail || !lakePassword || (lakeTab === "register" && !lakePassword2)}
+                className="flex-1 py-2 text-sm font-semibold bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40 rounded-lg hover:bg-[#00f0ff]/30 transition-colors disabled:opacity-50"
+              >
+                {lakeLoading ? "Procesando..." : lakeTab === "login" ? "Iniciar sesion" : "Crear cuenta"}
+              </button>
+              <button
+                onClick={handleLakeSkip}
+                className="flex-1 py-2 text-sm font-semibold text-[#849495] border border-white/10 rounded-lg hover:border-white/20 transition-colors"
+              >
+                Saltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
