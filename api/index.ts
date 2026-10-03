@@ -97,6 +97,9 @@ function truncateToMax(text: string, max: number): string {
 const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
 
+const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com/ollama").replace(/\/+$/, "");
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
+
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = process.env.GROQ_CHAT_MODEL || process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
@@ -154,6 +157,31 @@ async function callGroq(opts: {
     label: "Groq API",
     ...opts,
   });
+}
+
+async function callOllama(opts: {
+  system: string;
+  user: string;
+  temperature?: number;
+}): Promise<string> {
+  const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
+      messages: [
+        { role: "system", content: opts.system },
+        { role: "user", content: opts.user },
+      ],
+      options: { temperature: opts.temperature ?? 0.7 },
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const content = data?.message?.content || "";
+  if (!content) throw new Error("Ollama returned an empty response.");
+  return content;
 }
 
 async function callOmniRoute(opts: {
@@ -268,7 +296,23 @@ async function generateFriendReply(opts: {
     };
   };
 
-  // 0) PRIMARY: Groq (OpenAI-compatible) — low latency
+  // 0) PRIMARY: Ollama local (gratis, sin dependencias externas)
+  try {
+    const historyText = opts.history
+      .slice(-6)
+      .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
+      .join("\n");
+    const raw = await callOllama({
+      system: instruction + strict,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+      temperature: 0.7,
+    });
+    return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
+  } catch (err: any) {
+    console.warn("[FreeTalk] Ollama failed, switching to Groq:", err?.message || err);
+  }
+
+  // 1) BACKUP: Groq (OpenAI-compatible) — low latency
   if (process.env.GROQ_API_KEY) {
     try {
       const historyText = opts.history
@@ -532,7 +576,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
       };
     };
 
-    // 0) PRIMARY: Groq
+  // 1) BACKUP: Groq
     if (process.env.GROQ_API_KEY) {
       try {
         const conversation = (history || [])
