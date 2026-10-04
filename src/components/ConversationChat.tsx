@@ -15,10 +15,8 @@ import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, RotateCcw, X, Spar
 type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
 const CLOUD_API = "https://script.google.com/macros/s/AKfycbw0VN6XVNz_qdEx6zmAI5YMTPQG7acYcssVqBC4q5WO0vjbXV0H8oHqfbUZWURhIHhE/exec";
 const MAIN_APP_URL = "https://aurix-ver1-teclingo.vercel.app/";
-
-// Configuración de autoguardado por inactividad
-const INACTIVITY_SAVE_MS = 10 * 60 * 1000; // 10 minutos
-const MIN_MESSAGES_TO_SAVE = 3;
+const VALID_ACCESS_CODE = "AURIX2026"; // TODO: mover a validación backend
+const ACCESS_CODE_LS_KEY = "aurix_access_code";
 
 function buildKickoff(_name: string): string { return "Hello, AURIX!"; }
 
@@ -228,7 +226,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [cloudUsers, setCloudUsers] = useState<{ id: string; nickname: string }[]>([]);
   const [cloudTick, setCloudTick] = useState(0);
 
-  // Estado para el toggle de traducción de hints
+  // Toggle de traducción de hints
   const [showHintTranslations, setShowHintTranslations] = useState<boolean>(() => {
     try {
       return localStorage.getItem("ft_hint_translations") === "true";
@@ -237,21 +235,16 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     }
   });
 
-  // Estado para el modal de confirmación de salida
-  const [showExitModal, setShowExitModal] = useState(false);
-  const [pendingExitAction, setPendingExitAction] = useState<(() => void) | null>(null);
-  const [savingBeforeExit, setSavingBeforeExit] = useState(false);
+  // Modal de instrucciones iniciales (una vez por sesión)
+  const [showWelcomeModal, setShowWelcomeModal] = useState(true);
+  const welcomeShownRef = useRef(false);
 
-  // Lake login state
-  const [lakeLoginVisible, setLakeLoginVisible] = useState(false);
-  const [lakeTab, setLakeTab] = useState<"login" | "register">("login");
-  const [lakeEmail, setLakeEmail] = useState("");
-  const [lakeName, setLakeName] = useState("");
-  const [lakePassword, setLakePassword] = useState("");
-  const [lakePassword2, setLakePassword2] = useState("");
-  const [lakeError, setLakeError] = useState("");
-  const [lakeLoading, setLakeLoading] = useState(false);
-  const [lakeEmailReady, setLakeEmailReady] = useState(false);
+  // Modal de código de acceso (al guardar/salir)
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [accessCode, setAccessCode] = useState("");
+  const [codeError, setCodeError] = useState("");
+  const [savingBeforeExit, setSavingBeforeExit] = useState(false);
+  const [pendingExitAction, setPendingExitAction] = useState<(() => void) | null>(null);
 
   const recognitionRef = useRef<any>(null);
   const sendMessageRef = useRef<any>(null);
@@ -265,6 +258,9 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const audioUnlockedRef = useRef(false);
   const savedRef = useRef(false);
   const inactivityTimerRef = useRef<any>(null);
+
+  const MIN_MESSAGES_TO_SAVE = 3;
+  const INACTIVITY_SAVE_MS = 10 * 60 * 1000; // 10 minutos
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -356,30 +352,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       u.rate = 10;
       window.speechSynthesis.speak(u);
       audioUnlockedRef.current = true;
-      console.log('[TTS] Audio desbloqueado por interaccion del usuario');
-      setTimeout(() => {
-        if (phase === 'onboarding' && obStep === 0) {
-          speakNarrator(
-            '¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?'
-          );
-        }
-      }, 400);
+      console.log('[TTS] Audio desbloqueado');
     } catch (err) {
       console.warn('[TTS] Error al desbloquear audio:', err);
     }
-  }, [phase, obStep, speakNarrator]);
-
-  useEffect(() => {
-    const handler = () => unlockAudio();
-    window.addEventListener('pointerdown', handler, { once: true });
-    window.addEventListener('keydown', handler, { once: true });
-    window.addEventListener('touchstart', handler, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', handler);
-      window.removeEventListener('keydown', handler);
-      window.removeEventListener('touchstart', handler);
-    };
-  }, [unlockAudio]);
+  }, []);
 
   const speakFriend = useCallback(
     (text: string) => speakNow(text, "en-US", parseFloat(speed)),
@@ -531,13 +508,8 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [sendMessage]);
 
   const startFirstMessage = useCallback(
-    async (bypassAuth: boolean = false) => {
+    async () => {
       if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
-      const shouldBypass = bypassAuth === true;
-      if (!shouldBypass && !lakeEmailReady && !Identity.isLoggedIn()) {
-        setLakeLoginVisible(true);
-        return;
-      }
       playTransition();
       setMessages([]);
       historyReadyRef.current = false;
@@ -550,7 +522,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         speakFriend(first.text);
       }
     },
-    [sendMessage, speakFriend, phase, narratorBusy, lakeEmailReady, nickname]
+    [sendMessage, speakFriend, phase, narratorBusy, nickname]
   );
 
   useEffect(() => {
@@ -603,7 +575,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [stopSpeaking]);
 
   // ============================================================
-  // GUARDADO CON sendBeacon (no se cancela al cerrar)
+  // GUARDADO CON sendBeacon
   // ============================================================
   const saveWithBeacon = useCallback(async () => {
     if (savedRef.current) return false;
@@ -630,14 +602,12 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         summary_es: s.es,
       });
 
-      // Usar sendBeacon si está disponible (no se cancela al cerrar)
       if (navigator.sendBeacon) {
         navigator.sendBeacon(
           CLOUD_API,
           new Blob([payload], { type: "text/plain;charset=utf-8" })
         );
       } else {
-        // Fallback: fetch con keepalive
         fetch(CLOUD_API, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -658,7 +628,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [nickname, cloudUsers]);
 
   // ============================================================
-  // GUARDADO POR INACTIVIDAD (10 minutos)
+  // GUARDADO POR INACTIVIDAD (10 min)
   // ============================================================
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) {
@@ -674,7 +644,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     }, INACTIVITY_SAVE_MS);
   }, [phase, saveWithBeacon]);
 
-  // Resetear el timer cuando hay nuevos mensajes o cambia el estado
   useEffect(() => {
     if (phase === "conversation") {
       resetInactivityTimer();
@@ -687,7 +656,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [messages, phase, resetInactivityTimer]);
 
   // ============================================================
-  // beforeunload — advertencia del navegador
+  // beforeunload
   // ============================================================
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -702,40 +671,70 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [phase]);
 
   // ============================================================
-  // FUNCIÓN QUE INTENTA SALIR (muestra modal si hay cambios)
+  // VALIDACIÓN DEL CÓDIGO
+  // ============================================================
+  const validateCode = useCallback((code: string): boolean => {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) return false;
+    // TODO: validar contra backend cuando esté implementado
+    return trimmed === VALID_ACCESS_CODE;
+  }, []);
+
+  // ============================================================
+  // INTENTO DE SALIR (abre modal de código si hay cambios)
   // ============================================================
   const attemptExit = useCallback((action: () => void) => {
-    // Si estamos en conversación con mensajes sin guardar, mostrar modal
     if (
       phase === "conversation" &&
       messagesRef.current.length >= MIN_MESSAGES_TO_SAVE &&
       !savedRef.current
     ) {
+      // Si ya hay código válido guardado, guardar directo
+      const savedCode = localStorage.getItem(ACCESS_CODE_LS_KEY) || "";
+      if (savedCode && validateCode(savedCode)) {
+        setPendingExitAction(() => action);
+        setSavingBeforeExit(true);
+        saveWithBeacon().then(() => {
+          setSavingBeforeExit(false);
+          setPendingExitAction(null);
+          action();
+        });
+        return;
+      }
+      // Si no, mostrar modal de código
       setPendingExitAction(() => action);
-      setShowExitModal(true);
+      setCodeError("");
+      setAccessCode("");
+      setShowCodeModal(true);
     } else {
-      // Si no hay nada que guardar, salir directamente
       action();
     }
-  }, [phase]);
+  }, [phase, validateCode, saveWithBeacon]);
 
   const handleConfirmExit = useCallback(async () => {
+    if (!validateCode(accessCode)) {
+      setCodeError("Código inválido. Verifica con tu Director.");
+      return;
+    }
+    localStorage.setItem(ACCESS_CODE_LS_KEY, accessCode.trim().toUpperCase());
     setSavingBeforeExit(true);
     await saveWithBeacon();
     setSavingBeforeExit(false);
-    setShowExitModal(false);
+    setShowCodeModal(false);
     const action = pendingExitAction;
     setPendingExitAction(null);
     if (action) action();
-  }, [saveWithBeacon, pendingExitAction]);
+  }, [accessCode, validateCode, saveWithBeacon, pendingExitAction]);
 
   const handleCancelExit = useCallback(() => {
-    setShowExitModal(false);
+    setShowCodeModal(false);
+    setCodeError("");
+    setAccessCode("");
     setPendingExitAction(null);
   }, []);
 
   // ============================================================
-  // finishSession (GUARDADO MANUAL CON MODAL DE ÉXITO)
+  // finishSession (guardado manual)
   // ============================================================
   const finishSession = async () => {
     if (finishing) return;
@@ -757,9 +756,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         const known = cloudUsers.find((u) => u.nickname.toLowerCase() === nm.toLowerCase());
         uidSum = known ? known.id : "U-" + Date.now();
         localStorage.setItem("aurix_cloud_user", uidSum);
-        try {
-          fetch(CLOUD_API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "sync", user_id: uidSum, state: { nickname: nm } }) }).catch(() => {});
-        } catch (e2) {}
       }
       if (uidSum) {
         fetch(CLOUD_API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "saveSummary", user_id: uidSum, summary_en: s.en, summary_es: s.es }) }).catch(() => {});
@@ -781,20 +777,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     }, 600);
   };
 
-  const startNewSession = () => {
-    setCloudTick((t) => t + 1);
-    freeTalkStore.reset();
-    setMessages([]);
-    setNickname("");
-    setSummary({ en: "", es: "" });
-    setLevel("1");
-    setSpeed("0.7");
-    setMicStatus("idle");
-    setObStep(0);
-    setPhase("onboarding");
-    savedRef.current = false;
-  };
-
   const handleResetApp = () => {
     setCloudTick((t) => t + 1);
     if (!window.confirm("¿Borrar todo el historial y empezar el protocolo desde el inicio?")) {
@@ -803,14 +785,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     stopSpeaking();
     try {
       recognitionRef.current?.abort?.();
-    } catch {
-      // Ignorar.
-    }
+    } catch {}
     recognitionRef.current = null;
-
     freeTalkStore.reset();
     freeTalkStore.setVersion(STORAGE_VERSION);
-
     setMessages([]);
     messagesRef.current = [];
     setNickname("");
@@ -828,14 +806,12 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     setObStep(0);
     setPhase("onboarding");
     savedRef.current = false;
+    welcomeShownRef.current = false;
+    setShowWelcomeModal(true);
   };
 
   const sayKickoff = () => {
     if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
-    if (!lakeEmailReady && !Identity.isLoggedIn()) {
-      setLakeLoginVisible(true);
-      return;
-    }
     const rec = ensureRecognition();
     if (!rec) {
       startFirstMessage();
@@ -848,58 +824,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     if (email) {
       Identity.logActividadGlobal(email, herramienta, accion, detalle).catch(() => {});
     }
-  };
-
-  const handleLakeLogin = async () => {
-    if (lakeLoading) return;
-    setLakeError("");
-    setLakeLoading(true);
-    try {
-      const res = await Identity.doLogin(lakeEmail, lakePassword);
-      if (res.ok) {
-        setLakeEmailReady(true);
-        setLakeLoginVisible(false);
-        logActividadGlobalToLake(lakeEmail, "auth", "login_ok", "email");
-        startFirstMessage(true);
-      } else {
-        setLakeError(res.code === "credenciales_invalidas" ? "Credenciales incorrectas" : "Error al iniciar sesion");
-      }
-    } catch {
-      setLakeError("Error de conexion");
-    } finally {
-      setLakeLoading(false);
-    }
-  };
-
-  const handleLakeRegister = async () => {
-    if (lakeLoading) return;
-    if (lakePassword !== lakePassword2) {
-      setLakeError("Las contrasenas no coinciden");
-      return;
-    }
-    setLakeError("");
-    setLakeLoading(true);
-    try {
-      const res = await Identity.doRegister(lakeEmail, lakeName || nickname, lakePassword, nickname);
-      if (res.ok) {
-        setLakeEmailReady(true);
-        setLakeLoginVisible(false);
-        logActividadGlobalToLake(lakeEmail, "auth", "registro_exitoso", lakeName || nickname);
-        startFirstMessage(true);
-      } else {
-        setLakeError(res.code === "ya_registrado" ? "Este email ya esta registrado" : "Error al registrar");
-      }
-    } catch {
-      setLakeError("Error de conexion");
-    } finally {
-      setLakeLoading(false);
-    }
-  };
-
-  const handleLakeSkip = () => {
-    setLakeEmailReady(true);
-    setLakeLoginVisible(false);
-    startFirstMessage(true);
   };
 
   const isProtocolBlocked =
@@ -1417,10 +1341,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
     console.log("[ConversationChat] boot v3 → returning:", returning);
 
-    if (Identity.isLoggedIn()) {
-      setLakeEmailReady(true);
-    }
-
     if (returning && savedName) {
       setMessages(savedHistory);
       historyReadyRef.current = savedHistory.length > 0;
@@ -1534,6 +1454,56 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-[#0a0c12] text-white overflow-hidden">
       <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-[#00f0ff]/10 blur-[120px]" />
+
+      {/* Modal de instrucciones iniciales (aparece una vez al entrar) */}
+      {showWelcomeModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+          <div className="relative z-10 w-full max-w-md bg-[#0e0e0e] border border-[#00f0ff]/30 rounded-3xl p-8 shadow-2xl">
+            <div className="flex flex-col items-center gap-4 mb-6">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-[#00f2fe] via-[#4facfe] to-[#7f00ff] p-[2px] shadow-[0_0_30px_rgba(0,242,254,0.4)]">
+                <div className="w-full h-full rounded-full bg-[#0a0c12] flex items-center justify-center">
+                  <span className="text-2xl">🎧</span>
+                </div>
+              </div>
+              <h2 className="text-xl font-geist font-bold text-white text-center">Antes de comenzar</h2>
+            </div>
+            <div className="space-y-3 mb-6">
+              <div className="flex items-start gap-3">
+                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
+                <p className="text-sm text-[#c1c7cf] leading-relaxed">Asegúrate de tener el <b className="text-white">volumen alto</b> y audífonos conectados</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
+                <p className="text-sm text-[#c1c7cf] leading-relaxed">Te pediremos permiso para usar el <b className="text-white">micrófono</b></p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
+                <p className="text-sm text-[#c1c7cf] leading-relaxed">Conversarás en inglés con <b className="text-white">AURIX</b>, tu amigo virtual</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                unlockAudio();
+                welcomeShownRef.current = true;
+                setShowWelcomeModal(false);
+                // Disparar narración inicial después de desbloquear
+                setTimeout(() => {
+                  if (phase === "onboarding" && obStep === 0) {
+                    speakNarrator(
+                      "¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?"
+                    );
+                  }
+                }, 300);
+              }}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#00f2fe] to-[#7f00ff] text-white font-bold text-sm tracking-wide shadow-[0_10px_30px_rgba(0,242,254,0.3)] hover:scale-[1.02] transition-transform"
+            >
+              Comenzar
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="relative z-10 flex items-center justify-between px-3 py-2 pointer-events-none">
         <div className={`flex items-center gap-2 transition-opacity duration-700 ${topVisible ? "opacity-70" : "opacity-0"}`}>
           <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse" />
@@ -1616,100 +1586,36 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         {phase === "finished" && renderFinished()}
         {phase === "off" && renderOff()}
       </main>
-      {lakeLoginVisible && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={handleLakeSkip} />
-          <div className="relative z-10 w-full max-w-md bg-[#0e0e0e] border border-[#00f0ff]/20 rounded-2xl p-6 shadow-2xl">
-            <h3 className="text-lg font-geist font-bold text-white mb-4">Conecta tu cuenta</h3>
-            <p className="text-xs text-[#849495] mb-4">
-              Guarda tu progreso y resume de sesion en la nube. Opcional: puedes saltar y usar la app sin cuenta.
-            </p>
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={() => setLakeTab("login")}
-                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
-                  lakeTab === "login" ? "bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40" : "text-[#849495] border border-white/10"
-                }`}
-              >
-                Tengo cuenta
-              </button>
-              <button
-                onClick={() => setLakeTab("register")}
-                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
-                  lakeTab === "register" ? "bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40" : "text-[#849495] border border-white/10"
-                }`}
-              >
-                Crear cuenta
-              </button>
-            </div>
-            {lakeTab === "register" && (
-              <input
-                type="text"
-                value={lakeName}
-                onChange={(e) => setLakeName(e.target.value)}
-                placeholder="Tu nombre"
-                className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
-              />
-            )}
-            <input
-              type="email"
-              value={lakeEmail}
-              onChange={(e) => setLakeEmail(e.target.value)}
-              placeholder="Email"
-              className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
-            />
-            <input
-              type="password"
-              value={lakePassword}
-              onChange={(e) => setLakePassword(e.target.value)}
-              placeholder="Contrasena"
-              className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
-            />
-            {lakeTab === "register" && (
-              <input
-                type="password"
-                value={lakePassword2}
-                onChange={(e) => setLakePassword2(e.target.value)}
-                placeholder="Confirmar contrasena"
-                className="w-full px-3 py-2 mb-3 text-sm bg-[#0a0c12] border border-white/10 rounded-lg text-white placeholder-[#849495] focus:outline-none focus:border-[#00f0ff]/50"
-              />
-            )}
-            {lakeError && (
-              <p className="text-xs text-red-400 mb-3">{lakeError}</p>
-            )}
-            <div className="flex gap-2">
-              <button
-                onClick={lakeTab === "login" ? handleLakeLogin : handleLakeRegister}
-                disabled={lakeLoading || !lakeEmail || !lakePassword || (lakeTab === "register" && !lakePassword2)}
-                className="flex-1 py-2 text-sm font-semibold bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40 rounded-lg hover:bg-[#00f0ff]/30 transition-colors disabled:opacity-50"
-              >
-                {lakeLoading ? "Procesando..." : lakeTab === "login" ? "Iniciar sesion" : "Crear cuenta"}
-              </button>
-              <button
-                onClick={handleLakeSkip}
-                className="flex-1 py-2 text-sm font-semibold text-[#849495] border border-white/10 rounded-lg hover:border-white/20 transition-colors"
-              >
-                Saltar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Modal de confirmación al salir */}
-      {showExitModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={handleCancelExit} />
+      {/* Modal de código de acceso */}
+      {showCodeModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={handleCancelExit} />
           <div className="relative z-10 w-full max-w-md bg-[#0e0e0e] border border-[#00ff88]/30 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-[#00ff88]/15 flex items-center justify-center text-[#00ff88] shrink-0">
-                💾
+                🔐
               </div>
-              <h3 className="text-lg font-geist font-bold text-white">¿Salir de la conversación?</h3>
+              <h3 className="text-lg font-geist font-bold text-white">Código de acceso</h3>
             </div>
-            <p className="text-sm text-[#849495] leading-relaxed mb-6">
-              Guardaremos automáticamente tu conversación y generaremos un resumen para que puedas retomar donde quedaste la próxima vez.
+            <p className="text-sm text-[#849495] leading-relaxed mb-4">
+              Para guardar tu conversación necesitas el código de acceso que tu Director te entregó.
             </p>
+            <input
+              type="text"
+              value={accessCode}
+              onChange={(e) => {
+                setAccessCode(e.target.value.toUpperCase());
+                setCodeError("");
+              }}
+              onKeyDown={(e) => e.key === "Enter" && handleConfirmExit()}
+              placeholder="Ej: AURIX2026"
+              autoFocus
+              className="w-full px-4 py-3 mb-3 text-base text-center tracking-widest bg-[#0a0c12] border border-white/10 rounded-xl text-white placeholder-[#849495] focus:outline-none focus:border-[#00ff88]/50 uppercase"
+            />
+            {codeError && (
+              <p className="text-xs text-red-400 mb-3 text-center">{codeError}</p>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={handleCancelExit}
@@ -1720,7 +1626,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
               </button>
               <button
                 onClick={handleConfirmExit}
-                disabled={savingBeforeExit}
+                disabled={savingBeforeExit || !accessCode.trim()}
                 className="flex-1 py-3 text-sm font-bold bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/40 rounded-xl hover:bg-[#00ff88]/30 transition-colors disabled:opacity-50"
               >
                 {savingBeforeExit ? "Guardando..." : "Guardar y salir"}
