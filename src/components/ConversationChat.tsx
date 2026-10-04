@@ -270,6 +270,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
   // ── Auto-play unlock: el navegador bloquea el TTS hasta que hay interacción ──
   const audioUnlockedRef = useRef(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
 
   const unlockAudio = useCallback(() => {
     if (!('speechSynthesis' in window)) return;
@@ -281,17 +282,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       window.speechSynthesis.speak(u);
       audioUnlockedRef.current = true;
       console.log('[TTS] Audio desbloqueado por interaccion del usuario');
-      // Re-disparar el TTS de bienvenida si estamos en el primer step
-      setTimeout(() => {
-        if (phase === 'onboarding' && obStep === 0) {
-          speakNarrator(
-            '¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?'
-          );
-        }
-      }, 400);
+      setAudioUnlocked(true);
     } catch (err) {
+      console.warn('[TTS] Error al desbloquear audio:', err);
     }
-  }, [phase, obStep, speakNarrator]);
+  }, []);
 
   // Desbloquear audio en el primer click/tap/tecla de la pagina
   useEffect(() => {
@@ -364,6 +359,17 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     [speakNow]
   );
 
+  // Re-disparar TTS de bienvenida al desbloquear el audio
+  useEffect(() => {
+    if (!audioUnlocked) return;
+    if (phase !== 'onboarding' || obStep !== 0) return;
+    // Solo si no está hablando ya (evita doble reproducción)
+    if (!window.speechSynthesis.speaking) {
+      speakNarrator(
+        '¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?'
+      );
+    }
+  }, [audioUnlocked, phase, obStep, speakNarrator]);
   const speakFriend = useCallback(
     (text: string) => speakNow(text, "en-US", parseFloat(speed)),
     [speakNow, speed]
