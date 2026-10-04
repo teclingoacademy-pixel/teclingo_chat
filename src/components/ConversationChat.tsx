@@ -812,28 +812,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
             Practica <b className="text-white">speaking libre</b> en inglés: sin gramática, sin reglas, sin
             calificaciones. Un amigo virtual que se adapta a tu nivel y se interesa por lo que te importa.
           </p>
-          {cloudUsers.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {cloudUsers.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => {
-                    localStorage.setItem("ft_cloud_user", u.id);
-                    freeTalkStore.setNickname(u.nickname);
-                    setNickname(u.nickname);
-                    setObStep(1);
-                  }}
-                  disabled={isProtocolBlocked}
-                  className="ft-pill"
-                >
-                  👤 {u.nickname}
-                </button>
-              ))}
-            </div>
-          )}
-          {cloudUsers.length > 0 && (
-            <p className="text-xs text-[#849495]">Toca tu perfil de la base de datos AURIX, o escribe otro nombre abajo.</p>
-          )}
           <label className="text-xs text-[#849495] uppercase tracking-widest">¿Cómo te llamas?</label>
           <input
             type="text"
