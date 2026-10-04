@@ -138,25 +138,6 @@ async function callOpenAICompatible(opts: {
   return content;
 }
 
-async function callGroq(opts: {
-  system: string;
-  user: string;
-  json?: boolean;
-  temperature?: number;
-}): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error("GROQ_API_KEY environment variable is missing.");
-  }
-  return callOpenAICompatible({
-    baseUrl: "https://api.groq.com/openai",
-    apiKey,
-    model: GROQ_MODEL,
-    label: "Groq API",
-    ...opts,
-  });
-}
-
 async function callOllama(opts: {
   system: string;
   user: string;
@@ -180,6 +161,25 @@ async function callOllama(opts: {
   const content = data?.message?.content || "";
   if (!content) throw new Error("Ollama returned an empty response.");
   return content;
+}
+
+async function callGroq(opts: {
+  system: string;
+  user: string;
+  json?: boolean;
+  temperature?: number;
+}): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY environment variable is missing.");
+  }
+  return callOpenAICompatible({
+    baseUrl: "https://api.groq.com/openai",
+    apiKey,
+    model: GROQ_MODEL,
+    label: "Groq API",
+    ...opts,
+  });
 }
 
 async function callOmniRoute(opts: {
@@ -207,8 +207,15 @@ const REPLY_SCHEMA = {
     spanish: { type: "STRING" },
     hints: {
       type: "ARRAY",
-      items: { type: "STRING" },
-      description: "4 short English phrases the student could say next",
+      items: {
+        type: "OBJECT",
+        properties: {
+          en: { type: "STRING" },
+          es: { type: "STRING" },
+        },
+        required: ["en", "es"],
+      },
+      description: "4 short English phrases with Spanish translation",
     },
   },
   required: ["english", "spanish"],
@@ -265,18 +272,20 @@ ${opts.resume ? `- The student is returning from a previous session. Warmly ackn
 ${wordRule}
 
 [REPLY HINTS - CRITICAL]
-In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply.
-- Each hint MUST be 3 to 6 words long. Short and simple.
+In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply, EACH WITH ITS SPANISH TRANSLATION.
+- Each hint MUST be 3 to 6 words long in English. Short and simple.
 - Each hint MUST be directly related to what YOU just said.
 - The 4 hints MUST follow this EXACT structure:
   1. An AFFIRMATION (e.g., "My name is Azul", "I love pizza")
   2. Another AFFIRMATION (e.g., "I am from Mexico", "I eat tacos")
   3. A QUESTION back to you (e.g., "What is your name?", "Do you like it?")
   4. An OPINION or INVITATION (e.g., "I think it is great", "Let us talk about music")
-- All hints MUST be 100% in English.
+- All hints MUST be 100% in English in the "en" field.
+- The "es" field MUST be the natural, warm Spanish translation of the "en" field.
 - The hints MUST be phrased in the FIRST PERSON, as if the STUDENT is saying them.
 - NEVER repeat the same hint twice in the same reply.
 - ALWAYS return exactly 4 hints, no more, no less.
+- The "hints" array MUST contain 4 OBJECTS, each with "en" and "es" keys.
 `;
 };
 
@@ -296,7 +305,7 @@ async function generateFriendReply(opts: {
       ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words — count carefully, be brief and natural.`
       : "";
 
-  const parseReply = (raw: string): { english: string; spanish: string; hints: string[] } => {
+  const parseReply = (raw: string): { english: string; spanish: string; hints: { en: string; es: string }[] } => {
     const trimmed = (raw || "").trim();
     let parsed: any = null;
     try {
@@ -306,8 +315,8 @@ async function generateFriendReply(opts: {
     }
     const rawHints = parsed && Array.isArray(parsed.hints) ? parsed.hints : [];
     const hints = rawHints
-      .filter((h: any) => typeof h === "string" && h.trim().length > 0)
-      .map((h: string) => h.trim())
+      .filter((h: any) => h && typeof h === "object" && typeof h.en === "string" && h.en.trim().length > 0)
+      .map((h: any) => ({ en: String(h.en).trim(), es: String(h.es || "").trim() }))
       .slice(0, 4);
     return {
       english: (parsed && typeof parsed.english === "string" ? parsed.english : trimmed).trim(),
@@ -324,7 +333,7 @@ async function generateFriendReply(opts: {
       .join("\n");
     const raw = await callOllama({
       system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": ["...", "...", "...", "..."]}`,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
       temperature: 0.7,
     });
     return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
@@ -341,7 +350,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callGroq({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": ["...", "...", "...", "..."]}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
         json: true,
         temperature: 0.7,
       });
@@ -360,7 +369,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": ["...", "...", "...", "..."]}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
         temperature: 0.7,
       });
       return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
@@ -499,7 +508,7 @@ app.post("/api/tutor/chat", async (req, res) => {
     const min = isNative ? null : rule.min;
     const max = isNative ? null : rule.max;
 
-    const sendReply = (english: string, spanish: string, model: string, hints: string[] = []) => {
+    const sendReply = (english: string, spanish: string, model: string, hints: { en: string; es: string }[] = []) => {
       res.json({
         reply: english,
         response: english,
