@@ -205,6 +205,17 @@ const REPLY_SCHEMA = {
   properties: {
     english: { type: "STRING" },
     spanish: { type: "STRING" },
+    hints: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          en: { type: "STRING" },
+          es: { type: "STRING" },
+        },
+        required: ["en", "es"],
+      },
+    },
   },
   required: ["english", "spanish"],
 };
@@ -258,6 +269,22 @@ You are a warm, friendly English conversation partner — a real friend, not a t
 ${opts.resume ? `- The student is returning from a previous session. Warmly acknowledge it: reference the last topic in English, briefly and naturally, and ask how they feel today.` : ""}
 
 ${wordRule}
+
+[REPLY HINTS - CRITICAL]
+In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply, EACH WITH ITS SPANISH TRANSLATION.
+- Each hint MUST be 3 to 6 words long in English. Short and simple.
+- Each hint MUST be directly related to what YOU just said.
+- The 4 hints MUST follow this EXACT structure:
+  1. An AFFIRMATION (e.g., "My name is Azul", "I love pizza")
+  2. Another AFFIRMATION (e.g., "I am from Mexico", "I eat tacos")
+  3. A QUESTION back to you (e.g., "What is your name?", "Do you like it?")
+  4. An OPINION or INVITATION (e.g., "I think it is great", "Let us talk about music")
+- All hints MUST be 100% in English in the "en" field.
+- The "es" field MUST be the natural, warm Spanish translation.
+- The hints MUST be in FIRST PERSON, as if the STUDENT is saying them.
+- NEVER repeat the same hint twice.
+- ALWAYS return exactly 4 hints.
+- The "hints" array MUST contain 4 OBJECTS, each with "en" and "es" keys.
 `;
 };
 
@@ -277,7 +304,7 @@ async function generateFriendReply(opts: {
       ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words — count carefully, be brief and natural.`
       : "";
 
-  const parseReply = (raw: string): { english: string; spanish: string } => {
+  const parseReply = (raw: string): { english: string; spanish: string; hints: { en: string; es: string }[] } => {
     const trimmed = (raw || "").trim();
     let parsed: any = null;
     try {
@@ -285,9 +312,15 @@ async function generateFriendReply(opts: {
     } catch {
       parsed = null;
     }
+    const rawHints = parsed && Array.isArray(parsed.hints) ? parsed.hints : [];
+    const hints = rawHints
+      .filter((h: any) => h && typeof h === "object" && typeof h.en === "string" && h.en.trim().length > 0)
+      .map((h: any) => ({ en: String(h.en).trim(), es: String(h.es || "").trim() }))
+      .slice(0, 4);
     return {
       english: (parsed && typeof parsed.english === "string" ? parsed.english : trimmed).trim(),
       spanish: (parsed && typeof parsed.spanish === "string" ? parsed.spanish : "").trim(),
+      hints,
     };
   };
 
@@ -299,7 +332,7 @@ async function generateFriendReply(opts: {
       .join("\n");
     const raw = await callOllama({
       system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
       temperature: 0.7,
     });
     return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
@@ -316,7 +349,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callGroq({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
         json: true,
         temperature: 0.7,
       });
@@ -326,7 +359,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  // 2) Backup: OmniRoute (multi-provider router, env-configurable)
+  // 2) Backup: OmniRoute
   if (process.env.OMNIROUTE_API_KEY) {
     try {
       const historyText = opts.history
@@ -335,7 +368,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
         temperature: 0.7,
       });
       return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
@@ -370,7 +403,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  return { english: "", spanish: "", model: "simulation-fallback" };
+  return { english: "", spanish: "", hints: [], model: "simulation-fallback" };
 }
 
 async function translateToSpanish(text: string): Promise<string> {
@@ -474,11 +507,12 @@ app.post("/api/tutor/chat", async (req, res) => {
     const min = isNative ? null : rule.min;
     const max = isNative ? null : rule.max;
 
-    const sendReply = (english: string, spanish: string, model: string) => {
+    const sendReply = (english: string, spanish: string, model: string, hints: { en: string; es: string }[] = []) => {
       res.json({
         reply: english,
         response: english,
         spanish,
+        reply_hints: hints,
         word_count: countWords(english),
         level,
         min,
@@ -489,7 +523,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       });
     };
 
-    // Regenerar hasta que cumpla el maximo (regla inviolable), luego truncar
+    // Generar respuesta
     let result = await generateFriendReply({
       history: history || [],
       user_input: inputPrompt,
@@ -502,7 +536,6 @@ app.post("/api/tutor/chat", async (req, res) => {
     });
 
     if (!result.english) {
-      // Friendly fallback (both AIs failed or no keys set) respecting the word limit
       const name = nickname || "friend";
       const byName = name ? ", " + name : "";
       const fallbacks: Record<string, { en: string; es: string }> = {
@@ -511,7 +544,7 @@ app.post("/api/tutor/chat", async (req, res) => {
         native: { en: "That sounds really interesting! Tell me more about it" + byName + ". I want to hear everything.", es: "¡Suena muy interesante! Cuéntame más. Quiero escucharlo todo." },
       };
       const fb = fallbacks[level] || fallbacks["1"];
-      sendReply(fb.en, fb.es, "simulation-fallback");
+      sendReply(fb.en, fb.es, "simulation-fallback", []);
       return;
     }
 
@@ -552,7 +585,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       }
     }
 
-    sendReply(result.english, result.spanish, result.model);
+    sendReply(result.english, result.spanish, result.model, result.hints || []);
   } catch (error: any) {
     console.error("Free Conversation API Error:", error);
     res.status(500).json({
@@ -684,7 +717,6 @@ app.post("/api/tutor/summarize", async (req, res) => {
 
 // --- API ENDPOINTS ---
 
-// Health check
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ONLINE",
@@ -697,11 +729,9 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Live System Telemetry
 app.get("/api/system-telemetry", (_req, res) => {
   const uptime = process.uptime();
   const memory = process.memoryUsage();
-
   const cpuLoad = (Math.sin(Date.now() / 2000) * 15 + 42).toFixed(1);
   const gpuCompute = (Math.cos(Date.now() / 1500) * 20 + 68).toFixed(1);
   const latency = Math.floor(Math.random() * 8 + 12);
@@ -722,16 +752,13 @@ app.get("/api/system-telemetry", (_req, res) => {
   });
 });
 
-// Primary Synthetic Intelligence Chat API (Gemini Integration)
 app.post("/api/chat", async (req, res) => {
   try {
     const { prompt, history, mode } = req.body;
-
     if (!prompt) {
       res.status(400).json({ error: "Prompt parameter is required." });
       return;
     }
-
     if (!process.env.GEMINI_API_KEY) {
       res.json({
         response: `[SYNTHETIC INTELLIGENCE OFFLINE SIMULATION]\nReceived command: "${prompt}".\nTo enable full neural inference, attach your GEMINI_API_KEY in Settings > Secrets.`,
@@ -741,11 +768,8 @@ app.post("/api/chat", async (req, res) => {
       });
       return;
     }
-
     const ai = getAiClient();
-
     let systemInstruction = "";
-
     if (mode === "DIAGNOSTIC") {
       systemInstruction = "You are NEXUS-7 AI Diagnostic System. Focus on system optimization, root cause analysis, security threat detection, and telemetry interpretation.";
     } else if (mode === "TACTICAL") {
@@ -755,7 +779,6 @@ app.post("/api/chat", async (req, res) => {
     } else {
       systemInstruction = buildNexus7SystemInstructions(req.body.user_profile || activeStudentProfile);
     }
-
     const response = await ai.models.generateContent({
       model: "gemini-3.6-flash",
       contents: [
@@ -765,14 +788,9 @@ app.post("/api/chat", async (req, res) => {
         })),
         { role: "user", parts: [{ text: prompt }] },
       ],
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
+      config: { systemInstruction, temperature: 0.7 },
     });
-
     const outputText = response.text || "[No response text generated]";
-
     res.json({
       response: outputText,
       mode: mode || "ASSISTANT",
@@ -788,7 +806,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Voice Command Analyzer
 app.post("/api/voice-command", async (req, res) => {
   try {
     const { commandText } = req.body;
@@ -796,7 +813,6 @@ app.post("/api/voice-command", async (req, res) => {
       res.status(400).json({ error: "commandText is required" });
       return;
     }
-
     if (!process.env.GEMINI_API_KEY) {
       res.json({
         command: commandText,
@@ -807,16 +823,12 @@ app.post("/api/voice-command", async (req, res) => {
       });
       return;
     }
-
     const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-3.6-flash",
       contents: `Analyze this spoken voice directive given to a futuristic AI HUD: "${commandText}". Classify the intent into one of [DIAGNOSTIC, QUERY, CODE_GEN, SYSTEM_OVERRIDE, DATA_ANALYSIS] and provide a crisp 2-sentence HUD response confirmation.`,
-      config: {
-        systemInstruction: "Return a concise tactical response.",
-      },
+      config: { systemInstruction: "Return a concise tactical response." },
     });
-
     res.json({
       command: commandText,
       summary: response.text || `Processed voice directive: "${commandText}"`,
