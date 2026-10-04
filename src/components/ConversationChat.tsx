@@ -16,7 +16,46 @@ type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
 const CLOUD_API = "https://script.google.com/macros/s/AKfycbw0VN6XVNz_qdEx6zmAI5YMTPQG7acYcssVqBC4q5WO0vjbXV0H8oHqfbUZWURhIHhE/exec";
 const MAIN_APP_URL = "https://aurix-ver1-teclingo.vercel.app/";
 
-function buildKickoff(_name: string): string { return "Hello, AURIX!"; }
+const KICKOFF_PHRASE = "Let's go";
+const KICKOFF_VARIANTS = ["lets go", "let go", "let's go", "letsgo", "les go", "i am ready", "im ready", "ready"];
+function buildKickoff(_name: string): string { return KICKOFF_PHRASE; }
+function levenshtein(a: string, b: string): number {
+  const matrix: number[][] = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i-1) === a.charAt(j-1)) {
+        matrix[i][j] = matrix[i-1][j-1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i-1][j-1] + 1,
+          matrix[i][j-1] + 1,
+          matrix[i-1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+function isKickoffPhrase(text: string): boolean {
+  const t = text.toLowerCase().trim();
+  
+  // 1. Matcheo exacto con variantes
+  if (KICKOFF_VARIANTS.some(v => t.includes(v))) return true;
+  
+  // 2. Matcheo parcial: contiene palabras clave comunes
+  const keywords = ['go', 'ready', 'start', 'let', 'lets'];
+  const words = t.split(/\s+/);
+  if (words.some(w => keywords.includes(w))) return true;
+  
+  // 3. Distancia de Levenshtein a "lets go" <= 3 (muy permisivo)
+  const target = 'lets go';
+  if (levenshtein(t, target) <= 3) return true;
+  
+  return false;
+}
 
 const SUGGESTIONS = [
   "Tell me about your day",
