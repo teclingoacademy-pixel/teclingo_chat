@@ -752,6 +752,24 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     }
   };
 
+  const handleWelcomeStart = () => {
+    setShowWelcomeModal(false);
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 10;
+      window.speechSynthesis.speak(u);
+      audioUnlockedRef.current = true;
+      setAudioUnlocked(true);
+      console.log('[TTS] Audio desbloqueado por INICIAR');
+    } catch (err) {
+      console.warn('[TTS] Error al desbloquear:', err);
+    }
+    setTimeout(() => {
+      speakNarrator('¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?');
+    }, 400);
+  };
+
   const handleLakeSkip = () => {
     setLakeEmailReady(true);
     setLakeLoginVisible(false);
