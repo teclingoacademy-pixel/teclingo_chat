@@ -66,9 +66,14 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 
 // --- FREE CONVERSATION ENGINE ---
 
-const LEVEL_RULES: Record<string, { min: number; max: number }> = {
-  "1": { min: 3, max: 5 },
-  "2": { min: 4, max: 7 },
+// Regulador de palabras por nivel + presupuesto de tokens para Ollama.
+// num_predict debe ser suficiente para: JSON + english + spanish + 4 hints.
+// Con 80 tokens alcanza para nivel 1 (3-5 palabras + hints cortos).
+// Con 500 tokens el modo native tiene espacio para 2-4 frases naturales.
+const LEVEL_RULES: Record<string, { min: number; max: number; numPredict: number }> = {
+  "1": { min: 3, max: 5, numPredict: 90 },
+  "2": { min: 4, max: 7, numPredict: 110 },
+  "native": { min: 0, max: 9999, numPredict: 500 },
 };
 
 function countWords(text: string): number {
@@ -96,6 +101,7 @@ You are AURIX, a warm, friendly English conversation partner — a real friend, 
 - Get to know the student little by little.
 - Ask open, friendly questions ("What...?", "How...?", "Tell me about...").
 - Keep it warm, casual, caring.
+- NEVER respond with generic filler like "Sounds nice!", "Tell me more!", "That's interesting!" — react with SPECIFIC content.
 `,
   },
   stranger: {
@@ -164,7 +170,7 @@ You are AURIX in FREE MODE. The student wants total freedom to talk about ANYTHI
 
 // --- OpenAI-compatible endpoints ---
 
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com").replace(/\/+$/, "");
+const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://ollama.teclingoingles.com").replace(/\/+$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
 const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
@@ -204,7 +210,12 @@ async function callOpenAICompatible(opts: {
   return content;
 }
 
-async function callOllama(opts: { system: string; user: string; temperature?: number }): Promise<string> {
+async function callOllama(opts: {
+  system: string;
+  user: string;
+  temperature?: number;
+  numPredict?: number;
+}): Promise<string> {
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -218,7 +229,7 @@ async function callOllama(opts: { system: string; user: string; temperature?: nu
       ],
       options: {
         temperature: opts.temperature ?? 0.7,
-        num_predict: 120,
+        num_predict: opts.numPredict ?? 400,
         num_ctx: 2048,
         top_k: 40,
         top_p: 0.9,
@@ -298,7 +309,7 @@ const buildFreeTalkInstructions = (opts: {
   const personaName = persona.name;
 
   const wordRule = isNative
-    ? `- NO word limit: reply naturally, like a normal native speaker, at a relaxed pace.`
+    ? `- NO word limit: reply naturally, like a normal native speaker, at a relaxed pace (2-4 sentences).`
     : `- HARD WORD LIMIT (SACRED RULE, NEVER BREAK IT): your "english" reply MUST contain between ${opts.min} and ${opts.max} words. Count every single word. NEVER exceed ${opts.max} words and NEVER write fewer than ${opts.min}. This rule is non-negotiable.`;
 
   return `
@@ -310,6 +321,7 @@ Your persona name is "${personaName}". The student's name is ${studentName}.
 - Speak only English. Use simple, natural, friendly English suited to a learner.
 - Never give grammar lessons, never correct, never explain rules, never lecture.
 - Just converse like a real person who is genuinely curious about the student.
+- FORBIDDEN PHRASES: "Sounds nice", "Tell me more", "That's interesting", "That sounds good". These are BANNED. Always react with SPECIFIC content related to what the student just said.
 
 [HARD RULES]
 - The "english" field must be 100% in English.
@@ -317,6 +329,7 @@ Your persona name is "${personaName}". The student's name is ${studentName}.
 - You always take the first step when a conversation starts.
 - Ask open, friendly questions ("What...?", "How...?", "Tell me about...").
 - Adapt the difficulty of your words to a low level.
+- When the student mentions a topic (music, food, travel, work, family, movies, sports), react with a SPECIFIC comment about that exact topic: mention an artist, a dish, a place, an example. Then ask ONE relevant follow-up question.
 ${opts.resume ? `- The student is returning from a previous session. Warmly acknowledge it.` : ""}
 
 ${wordRule}
@@ -366,20 +379,25 @@ async function generateFriendReply(opts: {
     };
   };
 
-  // 0) PRIMARY: Ollama local (0.9s con keep_alive en RAM)
+  // Calcular tokens según nivel
+  const levelRule = LEVEL_RULES[opts.level];
+  const numPredict = levelRule?.numPredict ?? 400;
+
+  // 0) PRIMARY: Ollama local
   try {
     const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
     const raw = await callOllama({
       system: instruction + strict,
       user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
       temperature: 0.7,
+      numPredict,
     });
     return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
   } catch (err: any) {
     console.warn("[FreeTalk] Ollama failed, switching to Groq:", err?.message || err);
   }
 
-  // 1) BACKUP: Groq (1-2s, gratis)
+  // 1) BACKUP: Groq
   if (process.env.GROQ_API_KEY) {
     try {
       const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
@@ -446,6 +464,7 @@ async function translateToSpanish(text: string): Promise<string> {
       system: "You are a warm, natural translator into Latin American Spanish.",
       user: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
       temperature: 0.2,
+      numPredict: 200,
     });
     return out.trim();
   } catch (err: any) {
@@ -538,12 +557,13 @@ app.post("/api/tutor/chat", async (req, res) => {
     });
 
     if (!result.english) {
+      // Fallback natural (no genérico) — solo se dispara si TODOS los modelos fallan.
       const name = nickname || "friend";
       const byName = name ? ", " + name : "";
       const fallbacks: Record<string, { en: string; es: string }> = {
-        "1": { en: "Sounds nice! Tell me more.", es: "¡Suena bien! Cuéntame más." },
-        "2": { en: "Sounds nice! Tell me more" + byName + ".", es: "¡Suena bien! Cuéntame más" + byName + "." },
-        native: { en: "That sounds really interesting! Tell me more about it" + byName + ".", es: "¡Suena muy interesante! Cuéntame más." },
+        "1": { en: "Oh really?", es: "¿Ah, sí?" },
+        "2": { en: "Oh, that's cool" + byName + "!", es: "¡Oh, qué padre" + byName + "!" },
+        "native": { en: "Oh wow, that's interesting" + byName + "! What happened next?", es: "¡Oh, wow, qué interesante" + byName + "! ¿Y qué pasó después?" },
       };
       const fb = fallbacks[level] || fallbacks["1"];
       sendReply(fb.en, fb.es, "simulation-fallback", []);
@@ -620,6 +640,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
         system: "You write warm, concise session summaries for an English learning app.",
         user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
         temperature: 0.4,
+        numPredict: 300,
       });
       res.json({ ...parseSummary(raw), status: "success", model: `ollama/${OLLAMA_MODEL}` });
       return;
