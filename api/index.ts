@@ -72,10 +72,10 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 
 // --- FREE CONVERSATION ENGINE (SPEAKING PRACTICE, NO GRAMMAR) ---
 
+// Regulador de palabras: niveles inviolables de longitud de respuesta
 const LEVEL_RULES: Record<string, { min: number; max: number }> = {
   "1": { min: 3, max: 5 },
-  "2": { min: 4, max: 8 },
-  "3": { min: 5, max: 10 },
+  "2": { min: 4, max: 7 },
 };
 
 function countWords(text: string): number {
@@ -205,18 +205,6 @@ const REPLY_SCHEMA = {
   properties: {
     english: { type: "STRING" },
     spanish: { type: "STRING" },
-    hints: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: {
-          en: { type: "STRING" },
-          es: { type: "STRING" },
-        },
-        required: ["en", "es"],
-      },
-      description: "4 short English phrases with Spanish translation",
-    },
   },
   required: ["english", "spanish"],
 };
@@ -270,22 +258,6 @@ You are a warm, friendly English conversation partner — a real friend, not a t
 ${opts.resume ? `- The student is returning from a previous session. Warmly acknowledge it: reference the last topic in English, briefly and naturally, and ask how they feel today.` : ""}
 
 ${wordRule}
-
-[REPLY HINTS - CRITICAL]
-In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply, EACH WITH ITS SPANISH TRANSLATION.
-- Each hint MUST be 3 to 6 words long in English. Short and simple.
-- Each hint MUST be directly related to what YOU just said.
-- The 4 hints MUST follow this EXACT structure:
-  1. An AFFIRMATION (e.g., "My name is Azul", "I love pizza")
-  2. Another AFFIRMATION (e.g., "I am from Mexico", "I eat tacos")
-  3. A QUESTION back to you (e.g., "What is your name?", "Do you like it?")
-  4. An OPINION or INVITATION (e.g., "I think it is great", "Let us talk about music")
-- All hints MUST be 100% in English in the "en" field.
-- The "es" field MUST be the natural, warm Spanish translation of the "en" field.
-- The hints MUST be phrased in the FIRST PERSON, as if the STUDENT is saying them.
-- NEVER repeat the same hint twice in the same reply.
-- ALWAYS return exactly 4 hints, no more, no less.
-- The "hints" array MUST contain 4 OBJECTS, each with "en" and "es" keys.
 `;
 };
 
@@ -305,7 +277,7 @@ async function generateFriendReply(opts: {
       ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words — count carefully, be brief and natural.`
       : "";
 
-  const parseReply = (raw: string): { english: string; spanish: string; hints: { en: string; es: string }[] } => {
+  const parseReply = (raw: string): { english: string; spanish: string } => {
     const trimmed = (raw || "").trim();
     let parsed: any = null;
     try {
@@ -313,15 +285,9 @@ async function generateFriendReply(opts: {
     } catch {
       parsed = null;
     }
-    const rawHints = parsed && Array.isArray(parsed.hints) ? parsed.hints : [];
-    const hints = rawHints
-      .filter((h: any) => h && typeof h === "object" && typeof h.en === "string" && h.en.trim().length > 0)
-      .map((h: any) => ({ en: String(h.en).trim(), es: String(h.es || "").trim() }))
-      .slice(0, 4);
     return {
       english: (parsed && typeof parsed.english === "string" ? parsed.english : trimmed).trim(),
       spanish: (parsed && typeof parsed.spanish === "string" ? parsed.spanish : "").trim(),
-      hints,
     };
   };
 
@@ -333,7 +299,7 @@ async function generateFriendReply(opts: {
       .join("\n");
     const raw = await callOllama({
       system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
       temperature: 0.7,
     });
     return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
@@ -350,7 +316,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callGroq({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
         json: true,
         temperature: 0.7,
       });
@@ -369,7 +335,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
         temperature: 0.7,
       });
       return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
@@ -404,7 +370,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  return { english: "", spanish: "", hints: [], model: "simulation-fallback" };
+  return { english: "", spanish: "", model: "simulation-fallback" };
 }
 
 async function translateToSpanish(text: string): Promise<string> {
@@ -508,12 +474,11 @@ app.post("/api/tutor/chat", async (req, res) => {
     const min = isNative ? null : rule.min;
     const max = isNative ? null : rule.max;
 
-    const sendReply = (english: string, spanish: string, model: string, hints: { en: string; es: string }[] = []) => {
+    const sendReply = (english: string, spanish: string, model: string) => {
       res.json({
         reply: english,
         response: english,
         spanish,
-        reply_hints: hints,
         word_count: countWords(english),
         level,
         min,
@@ -524,6 +489,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       });
     };
 
+    // Regenerar hasta que cumpla el maximo (regla inviolable), luego truncar
     let result = await generateFriendReply({
       history: history || [],
       user_input: inputPrompt,
@@ -536,22 +502,31 @@ app.post("/api/tutor/chat", async (req, res) => {
     });
 
     if (!result.english) {
+      // Friendly fallback (both AIs failed or no keys set) respecting the word limit
       const name = nickname || "friend";
       const byName = name ? ", " + name : "";
       const fallbacks: Record<string, { en: string; es: string }> = {
         "1": { en: "Sounds nice! Tell me more.", es: "¡Suena bien! Cuéntame más." },
         "2": { en: "Sounds nice! Tell me more" + byName + ".", es: "¡Suena bien! Cuéntame más" + byName + "." },
-        "3": { en: "That sounds nice! Tell me more" + byName + ".", es: "¡Suena muy bien! Cuéntame más" + byName + "." },
         native: { en: "That sounds really interesting! Tell me more about it" + byName + ". I want to hear everything.", es: "¡Suena muy interesante! Cuéntame más. Quiero escucharlo todo." },
       };
       const fb = fallbacks[level] || fallbacks["1"];
-      sendReply(fb.en, fb.es, "simulation-fallback", []);
+      sendReply(fb.en, fb.es, "simulation-fallback");
       return;
     }
 
+    // Verificación estricta: regenerar si NO cumple min Y max
     let attempts = 0;
-    while (!isNative && countWords(result.english) > (rule?.max ?? Infinity) && attempts < 2) {
+    while (
+      !isNative &&
+      (countWords(result.english) > (rule?.max ?? Infinity) ||
+        countWords(result.english) < (rule?.min ?? 0)) &&
+      attempts < 3
+    ) {
       attempts++;
+      console.log(
+        `[FreeTalk] Reintento ${attempts}: ${countWords(result.english)} palabras (necesita ${rule?.min}-${rule?.max})`
+      );
       result = await generateFriendReply({
         history: history || [],
         user_input: inputPrompt,
@@ -564,6 +539,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       });
     }
 
+    // Si aún excede el máximo, truncar
     if (!isNative && countWords(result.english) > (rule?.max ?? Infinity)) {
       result.english = truncateToMax(result.english, rule?.max ?? Infinity);
     }
@@ -576,7 +552,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       }
     }
 
-    sendReply(result.english, result.spanish, result.model, result.hints || []);
+    sendReply(result.english, result.spanish, result.model);
   } catch (error: any) {
     console.error("Free Conversation API Error:", error);
     res.status(500).json({

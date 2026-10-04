@@ -1,4 +1,4 @@
-export type FreeTalkLevel = "1" | "2" | "3" | "native";
+export type FreeTalkLevel = "1" | "2" | "native";
 export type FreeTalkSpeed = "0.5" | "0.7" | "1.0";
 
 export interface FreeTalkTurn {
@@ -10,7 +10,7 @@ export interface FreeTalkTurn {
 export interface ChatReply {
   reply: string;
   spanish?: string;
-  reply_hints?: string[];
+  reply_hints?: { en: string; es: string }[];
   word_count: number;
   level: string;
   min: number | null;
@@ -35,8 +35,7 @@ const LS = {
 
 export const LEVEL_LABELS: Record<FreeTalkLevel, { label: string; range: string }> = {
   "1": { label: "Nivel 1", range: "3 a 5 palabras" },
-  "2": { label: "Nivel 2", range: "4 a 8 palabras" },
-  "3": { label: "Nivel 3", range: "5 a 10 palabras" },
+  "2": { label: "Nivel 2", range: "4 a 7 palabras" },
   native: { label: "Modo nativo", range: "Sin filtro" },
 };
 
@@ -54,8 +53,14 @@ export const freeTalkStore = {
     localStorage.setItem(LS.nickname, n);
   },
   getLevel(): FreeTalkLevel {
-    const v = localStorage.getItem(LS.level) as FreeTalkLevel | null;
-    return v && ["1", "2", "3", "native"].includes(v) ? v : "1";
+    const v = localStorage.getItem(LS.level) as FreeTalkLevel | string | null;
+    if (!v) return "1";
+    // Migrar "3" obsoleto a "native"
+    if (v === "3") {
+      localStorage.setItem(LS.level, "native");
+      return "native";
+    }
+    return ["1", "2", "native"].includes(v) ? (v as FreeTalkLevel) : "1";
   },
   setLevel(l: FreeTalkLevel) {
     localStorage.setItem(LS.level, l);
@@ -140,7 +145,7 @@ export async function sendFreeTalkMessage(
     }),
   });
   if (!res.ok) {
-  clearTimeout(chatTimer);
+    clearTimeout(chatTimer);
     throw new Error("No se pudo conectar con tu amigo de conversación.");
   }
   return res.json();
@@ -164,6 +169,3 @@ export async function generateSessionSummary(
     summary_es: data.summary_es || "",
   };
 }
-
-
-
