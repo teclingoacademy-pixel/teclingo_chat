@@ -268,6 +268,44 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     setNarratorBusy(false);
   }, []);
 
+  // ── Auto-play unlock: el navegador bloquea el TTS hasta que hay interacción ──
+  const audioUnlockedRef = useRef(false);
+
+  const unlockAudio = useCallback(() => {
+    if (!('speechSynthesis' in window)) return;
+    if (audioUnlockedRef.current) return;
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 10;
+      window.speechSynthesis.speak(u);
+      audioUnlockedRef.current = true;
+      console.log('[TTS] Audio desbloqueado por interaccion del usuario');
+      // Re-disparar el TTS de bienvenida si estamos en el primer step
+      setTimeout(() => {
+        if (phase === 'onboarding' && obStep === 0) {
+          speakNarrator(
+            '¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?'
+          );
+        }
+      }, 400);
+    } catch (err) {
+    }
+  }, [phase, obStep, speakNarrator]);
+
+  // Desbloquear audio en el primer click/tap/tecla de la pagina
+  useEffect(() => {
+    const handler = () => unlockAudio();
+    window.addEventListener('pointerdown', handler, { once: true });
+    window.addEventListener('keydown', handler, { once: true });
+    window.addEventListener('touchstart', handler, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handler);
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener('touchstart', handler);
+    };
+  }, [unlockAudio]);
+
   const speakNow = useCallback(
     (text: string, lang: string, rate: number) => {
       if (!("speechSynthesis" in window)) {
