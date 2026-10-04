@@ -363,12 +363,13 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   useEffect(() => {
     if (!audioUnlocked) return;
     if (phase !== 'onboarding' || obStep !== 0) return;
-    // Solo si no está hablando ya (evita doble reproducción)
-    if (!window.speechSynthesis.speaking) {
+    // Esperar 600ms a que termine el utterance silencioso del unlock
+    const timeout = setTimeout(() => {
       speakNarrator(
         '¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?'
       );
-    }
+    }, 600);
+    return () => clearTimeout(timeout);
   }, [audioUnlocked, phase, obStep, speakNarrator]);
   const speakFriend = useCallback(
     (text: string) => speakNow(text, "en-US", parseFloat(speed)),
