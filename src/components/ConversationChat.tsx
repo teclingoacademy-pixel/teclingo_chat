@@ -271,6 +271,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   // ── Auto-play unlock: el navegador bloquea el TTS hasta que hay interacción ──
   const audioUnlockedRef = useRef(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
   const unlockAudio = useCallback(() => {
     if (!('speechSynthesis' in window)) return;
@@ -300,6 +301,14 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       window.removeEventListener('touchstart', handler);
     };
   }, [unlockAudio]);
+
+  // Mostrar el modal de bienvenida para usuarios nuevos
+  useEffect(() => {
+    if (phase === "onboarding" && !freeTalkStore.getSummary().es) {
+      setShowWelcomeModal(true);
+    }
+  }, []);
+
 
   const speakNow = useCallback(
     (text: string, lang: string, rate: number) => {
@@ -1436,6 +1445,47 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         {phase === "finished" && renderFinished()}
         {phase === "off" && renderOff()}
       </main>
+      {showWelcomeModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md p-6">
+          <div className="max-w-md w-full bg-[#0e0e0e] border border-[#00f0ff]/25 rounded-3xl p-8 text-center shadow-2xl">
+            <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-tr from-[#00f2fe] via-[#4facfe] to-[#7f00ff] flex items-center justify-center shadow-[0_0_40px_rgba(0,242,254,0.3)]">
+              <Mic className="w-10 h-10 text-white" />
+            </div>
+            <h2 className="text-2xl font-geist font-bold text-white mb-2">Venus AI Tutor</h2>
+            <p className="text-[#00f0ff] text-[10px] font-black uppercase tracking-widest mb-6">Tu coach personal de inglés</p>
+            <p className="text-[#849495] text-sm leading-relaxed mb-6">
+              Soy tu amigo virtual para practicar conversación en inglés. Sin gramática, sin reglas, sin calificaciones.
+            </p>
+            <div className="space-y-2 mb-6 text-left">
+              <div className="flex items-start gap-3">
+                <span className="text-[#00ff88] text-sm">✓</span>
+                <p className="text-[#849495] text-xs">Conversación libre adaptada a tu nivel</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-[#00ff88] text-sm">✓</span>
+                <p className="text-[#849495] text-xs">Puedes pedir traducción al español cuando quieras</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-[#00ff88] text-sm">✓</span>
+                <p className="text-[#849495] text-xs">Tú controlas el ritmo y la dificultad</p>
+              </div>
+            </div>
+            <p className="text-white text-base font-geist font-semibold italic mb-8 leading-relaxed">
+              "Tu coach de inglés te espera.<br />¿Comenzamos la aventura?"
+            </p>
+            <button
+              onClick={handleWelcomeStart}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-[#00f2fe] to-[#4facfe] text-[#002022] font-black uppercase tracking-widest text-sm shadow-[0_0_30px_rgba(0,240,255,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
+            >
+              ▶ INICIAR
+            </button>
+            <p className="text-[9px] text-[#849495] mt-4 leading-relaxed">
+              Asegúrate de tener el volumen alto y audífonos conectados.
+            </p>
+          </div>
+        </div>
+      )}
+
       {lakeLoginVisible && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={handleLakeSkip} />
