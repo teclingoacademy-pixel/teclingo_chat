@@ -1,6 +1,6 @@
 export type FreeTalkLevel = "1" | "2" | "native";
 export type FreeTalkSpeed = "0.5" | "0.7" | "1.0";
-export type FreeTalkRole = "friend" | "stranger" | "cafe" | "coworker" | "classmate" | "party";
+export type FreeTalkRole = "friend" | "stranger" | "cafe" | "coworker" | "classmate" | "party" | "free";
 
 export interface FreeTalkTurn {
   role: "user" | "assistant";
@@ -15,6 +15,7 @@ export interface ChatReply {
   word_count: number;
   level: string;
   role?: FreeTalkRole;
+  persona_name?: string;
   min: number | null;
   max: number | null;
   status: string;
@@ -42,13 +43,56 @@ export const LEVEL_LABELS: Record<FreeTalkLevel, { label: string; range: string 
   native: { label: "Modo nativo", range: "Sin filtro" },
 };
 
-export const ROLE_LABELS: Record<FreeTalkRole, { label: string; emoji: string; description: string }> = {
-  friend: { label: "Amigo", emoji: "👥", description: "Conversación libre con AURIX" },
-  stranger: { label: "Extranjero", emoji: "🌍", description: "Conoce a alguien en un viaje" },
-  cafe: { label: "Café", emoji: "☕", description: "Pide en un café o restaurante" },
-  coworker: { label: "Compañero de trabajo", emoji: "💼", description: "Small talk en la oficina" },
-  classmate: { label: "Compañero de escuela", emoji: "🎓", description: "Conoce a alguien en clase" },
-  party: { label: "Fiesta", emoji: "🎉", description: "Conoce gente en un evento" },
+export const ROLE_LABELS: Record<FreeTalkRole, { label: string; emoji: string; personaName: string; description: string; color: string }> = {
+  friend: {
+    label: "Amiga",
+    emoji: "💬",
+    personaName: "AURIX",
+    description: "Tu amiga de siempre",
+    color: "#00f0ff",
+  },
+  stranger: {
+    label: "Viajera",
+    emoji: "🌍",
+    personaName: "Emily",
+    description: "Conoce a una viajera",
+    color: "#4facfe",
+  },
+  cafe: {
+    label: "Barista",
+    emoji: "☕",
+    personaName: "Jennifer",
+    description: "Pide en su café",
+    color: "#ff9f43",
+  },
+  coworker: {
+    label: "Colega",
+    emoji: "💼",
+    personaName: "Amanda",
+    description: "Small talk en la oficina",
+    color: "#4ade80",
+  },
+  classmate: {
+    label: "Compañera",
+    emoji: "🎓",
+    personaName: "Rachel",
+    description: "Conoce a una estudiante",
+    color: "#e879f9",
+  },
+  party: {
+    label: "Fiesta",
+    emoji: "🎉",
+    personaName: "Sofia",
+    description: "Conoce gente en una fiesta",
+    color: "#a855f7",
+  },
+  free: {
+    label: "Libre",
+    emoji: "♾️",
+    personaName: "AURIX",
+    description: "Habla de lo que quieras",
+    color: "#22d3ee",
+  },
 };
 
 export const freeTalkStore = {
@@ -85,7 +129,7 @@ export const freeTalkStore = {
   },
   getRole(): FreeTalkRole {
     const v = localStorage.getItem(LS.role) as FreeTalkRole | null;
-    return v && ["friend", "stranger", "cafe", "coworker", "classmate", "party"].includes(v) ? v : "friend";
+    return v && ["friend", "stranger", "cafe", "coworker", "classmate", "party", "free"].includes(v) ? v : "friend";
   },
   setRole(r: FreeTalkRole) {
     localStorage.setItem(LS.role, r);
