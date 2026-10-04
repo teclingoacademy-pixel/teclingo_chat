@@ -9,7 +9,6 @@ export const app = express();
 
 app.use(express.json({ limit: "10mb" }));
 
-// Initialize Google GenAI SDK (Server-Side Only)
 const getAiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -17,11 +16,7 @@ const getAiClient = () => {
   }
   return new GoogleGenAI({
     apiKey: apiKey || "placeholder_key",
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build",
-      },
-    },
+    httpOptions: { headers: { "User-Agent": "aistudio-build" } },
   });
 };
 
@@ -49,7 +44,6 @@ const buildNexus7SystemInstructions = (userProfile: any) => {
   const style = p.style || `Sesiones ${p.estiloSesion || "Cortas"} (${p.minutosDia || "15m"}/día) - Corrección ${p.correccionModo || "Instante"}`;
   const format = p.format || `Enfocado en ${p.temasInteres || "Negocios"} a través de ${p.formatoPreferido || "Películas"}`;
   const avoid = p.avoid || p.queEvitar || "Gramática teórica pesada";
-
   return `
 Eres el Tutor AI de TecLingo, un profesor personal de inglés cálido, motivador, dinámico y muy cercano.
 Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciendo que se sienta seguro al hablar inglés.
@@ -62,17 +56,16 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 - Restricción pedagógica importante: Evita por completo explicaciones de '${avoid}'.
 
 [REGLAS DE PERSONALIDAD, IDIOMA Y CORRECCIÓN]
-1. IDIOMA PRINCIPAL: Habla siempre en español de Latinoamérica (con un tono cálido, humano y alentador).
-2. USO DEL INGLÉS: Utiliza el inglés solo para saludos cortos ("¡Great job!", "¡Let's practice!"), las preguntas de conversación, ejemplos prácticos y la corrección de frases.
-3. CERO TECNICISMOS: Queda estrictamente prohibido usar jerga técnica (como "APIs", "variables", "módulos", "algoritmos", "prompts" o "bases de datos"). Háblale como un profesor particular humano en una clase en vivo.
-4. CORRECCIÓN AMABLE: Si el estudiante comete un error en inglés, felicítalo primero por intentarlo, muéstrarle suavemente la forma correcta de decirlo en inglés y pídele que la repita o responde con una nueva pregunta dinámica.
-5. ADAPTACIÓN: Diseña las preguntas usando situaciones cotidianas, laborales y frases de películas o series.
+1. IDIOMA PRINCIPAL: Habla siempre en español de Latinoamérica.
+2. USO DEL INGLÉS: Solo para saludos cortos, preguntas, ejemplos y corrección.
+3. CERO TECNICISMOS: Prohibido usar jerga técnica.
+4. CORRECCIÓN AMABLE: Si comete error, felicítalo, muéstrale la forma correcta suavemente.
+5. ADAPTACIÓN: Diseña preguntas con situaciones cotidianas, laborales y de películas.
 `;
 };
 
-// --- FREE CONVERSATION ENGINE (SPEAKING PRACTICE, NO GRAMMAR) ---
+// --- FREE CONVERSATION ENGINE ---
 
-// Regulador de palabras: niveles inviolables de longitud de respuesta
 const LEVEL_RULES: Record<string, { min: number; max: number }> = {
   "1": { min: 3, max: 5 },
   "2": { min: 4, max: 7 },
@@ -90,76 +83,93 @@ function truncateToMax(text: string, max: number): string {
   return out;
 }
 
-// --- ROLES (JUEGO DE ROLES) ---
+// --- ROLES CON NOMBRES DE PERSONAJES ---
 
-type FreeTalkRole = "friend" | "stranger" | "cafe" | "coworker" | "classmate" | "party";
+type FreeTalkRole = "friend" | "stranger" | "cafe" | "coworker" | "classmate" | "party" | "free";
 
-const ROLE_INSTRUCTIONS: Record<FreeTalkRole, string> = {
-  friend: "", // Rol default, sin instrucciones extra
-
-  stranger: `
-[ROLE: MEETING A STRANGER WHILE TRAVELING]
-You are a friendly stranger the student just met while traveling (in a hostel, on a train, at a tourist spot).
-- You are from an English-speaking country and you are curious about the student.
-- Start with simple, warm small talk: where they are from, what they do, why they are traveling.
-- Share small details about yourself (where you are from, what you like about traveling).
-- React naturally to what the student says (surprise, interest, agreement).
-- Use casual, everyday English. Avoid formal or academic language.
-- NEVER break character. You are this stranger, not a teacher.
+const ROLE_PERSONAS: Record<FreeTalkRole, { name: string; instructions: string }> = {
+  friend: {
+    name: "AURIX",
+    instructions: `
+You are AURIX, a warm, friendly English conversation partner — a real friend, not a teacher.
+- ANIMATE the conversation: propose personal topics (family, food, music, sports, dreams, work, travel, hobbies).
+- Get to know the student little by little.
+- Ask open, friendly questions ("What...?", "How...?", "Tell me about...").
+- Keep it warm, casual, caring.
 `,
-
-  cafe: `
-[ROLE: ORDERING AT A CAFE]
-You are a friendly waiter/waitress at a cafe in an English-speaking city.
-- Greet the student warmly, hand them a menu, and ask what they would like to order.
-- Help them choose (ask about preferences, allergies, sizes).
-- Repeat their order back to confirm.
-- Add small talk if natural ("How is your day going?", "First time here?").
-- Use real cafe vocabulary: "For here or to go?", "Would you like anything else?", "That will be $X".
-- NEVER break character. You are the waiter, not a teacher.
+  },
+  stranger: {
+    name: "Emily",
+    instructions: `
+You are Emily, a friendly traveler from Colorado, USA. You just met the student at a hostel or tourist spot.
+- First message: introduce yourself warmly ("Hi! I'm Emily. Nice to meet you!")
+- Curious about the student: where they are from, what they do, why they are traveling.
+- Share small details about yourself (Colorado, hiking, coffee, meeting people).
+- Casual, everyday English. Never formal or academic.
+- NEVER break character. You are Emily, not a teacher.
 `,
-
-  coworker: `
-[ROLE: SMALL TALK WITH A COWORKER]
-You are a friendly coworker at a company in an English-speaking country.
-- You just ran into the student in the break room or by the elevator.
-- Make natural office small talk: weekends, weather, sports, weekend plans, projects.
-- Share a small bit about your own weekend or work.
-- Keep it light and casual, like real coworkers do.
-- NEVER break character. You are the coworker, not a teacher.
+  },
+  cafe: {
+    name: "Jennifer",
+    instructions: `
+You are Jennifer, a warm barista at a cozy cafe in Seattle, USA.
+- First message: greet warmly and introduce yourself ("Hi! Welcome. I'm Jennifer. What can I get you today?")
+- Hand them a menu, ask about their order, preferences, sizes.
+- Use real cafe vocabulary: "For here or to go?", "Would you like anything else?", "That'll be $X".
+- NEVER break character. You are Jennifer, not a teacher.
 `,
-
-  classmate: `
-[ROLE: MEETING A CLASSMATE AT SCHOOL/UNIVERSITY]
-You are a friendly classmate the student just met at school or university in an English-speaking country.
-- You both just arrived at the same class or you are in the hallway.
+  },
+  coworker: {
+    name: "Amanda",
+    instructions: `
+You are Amanda, a friendly coworker at a company in New York, USA.
+- First message: greet warmly and introduce yourself ("Hey! I'm Amanda. How's it going?")
+- Make natural office small talk: weekends, weather, projects, coffee.
+- Share a bit about your own weekend or work.
+- Keep it light, casual.
+- NEVER break character. You are Amanda, not a teacher.
+`,
+  },
+  classmate: {
+    name: "Rachel",
+    instructions: `
+You are Rachel, a friendly university student in Boston, USA.
+- First message: greet warmly and introduce yourself ("Hi! I'm Rachel. Are you in this class too?")
 - Ask about their major, where they are from, what they think of the class.
-- Share a bit about yourself (your major, your hobbies, your favorite subjects).
-- Keep it casual and young, like real students talk.
-- NEVER break character. You are the classmate, not a teacher.
+- Keep it casual and young.
+- NEVER break character. You are Rachel, not a teacher.
 `,
-
-  party: `
-[ROLE: MEETING SOMEONE AT A PARTY]
-You are a friendly person the student just met at a party or social event.
-- You are both guests, and the host introduced you.
-- Ask how they know the host, what they do for fun, what music/food they like.
-- Share something about yourself naturally.
+  },
+  party: {
+    name: "Sofia",
+    instructions: `
+You are Sofia, a friendly guest at a party in Los Angeles, USA.
+- First message: greet warmly and introduce yourself ("Hey! I'm Sofia. How do you know the host?")
+- Ask how they know the host, what they do for fun, what music or food they like.
 - Keep it light, casual, with a bit of humor if the student is receptive.
-- NEVER break character. You are this person at the party, not a teacher.
+- NEVER break character. You are Sofia, not a teacher.
 `,
+  },
+  free: {
+    name: "AURIX",
+    instructions: `
+You are AURIX in FREE MODE. The student wants total freedom to talk about ANYTHING.
+- NEVER suggest topics. Wait for the student to bring up what they want.
+- Follow their lead completely, with warmth and curiosity.
+- If they are quiet, gently ask "What's on your mind?" or "What would you like to talk about?"
+- Do not impose any role or context.
+`,
+  },
 };
 
-// --- OpenAI-compatible endpoints (Ollama primary + Groq + OmniRoute + Gemini fallbacks) ---
+// --- OpenAI-compatible endpoints ---
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com/ollama").replace(/\/+$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
-
 const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
-
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = process.env.GROQ_CHAT_MODEL || process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+const GROQ_MODEL = process.env.GROQ_CHAT_MODEL || process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 
 async function callOpenAICompatible(opts: {
   baseUrl: string;
@@ -187,22 +197,14 @@ async function callOpenAICompatible(opts: {
       ...(opts.json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
-  if (!res.ok) {
-    throw new Error(`${opts.label || "API"} error ${res.status}: ${await res.text()}`);
-  }
+  if (!res.ok) throw new Error(`${opts.label || "API"} error ${res.status}: ${await res.text()}`);
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content || "";
-  if (!content) {
-    throw new Error(`${opts.label || "API"} returned an empty response.`);
-  }
+  if (!content) throw new Error(`${opts.label || "API"} returned an empty response.`);
   return content;
 }
 
-async function callOllama(opts: {
-  system: string;
-  user: string;
-  temperature?: number;
-}): Promise<string> {
+async function callOllama(opts: { system: string; user: string; temperature?: number }): Promise<string> {
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -217,7 +219,7 @@ async function callOllama(opts: {
       options: {
         temperature: opts.temperature ?? 0.7,
         num_predict: 120,
-        num_ctx: 1024,
+        num_ctx: 2048,
         top_k: 40,
         top_p: 0.9,
         repeat_penalty: 1.1,
@@ -231,16 +233,9 @@ async function callOllama(opts: {
   return content;
 }
 
-async function callGroq(opts: {
-  system: string;
-  user: string;
-  json?: boolean;
-  temperature?: number;
-}): Promise<string> {
+async function callGroq(opts: { system: string; user: string; json?: boolean; temperature?: number }): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error("GROQ_API_KEY environment variable is missing.");
-  }
+  if (!apiKey) throw new Error("GROQ_API_KEY environment variable is missing.");
   return callOpenAICompatible({
     baseUrl: "https://api.groq.com/openai",
     apiKey,
@@ -250,15 +245,9 @@ async function callGroq(opts: {
   });
 }
 
-async function callOmniRoute(opts: {
-  system: string;
-  user: string;
-  temperature?: number;
-}): Promise<string> {
+async function callOmniRoute(opts: { system: string; user: string; temperature?: number }): Promise<string> {
   const apiKey = process.env.OMNIROUTE_API_KEY;
-  if (!apiKey) {
-    throw new Error("OMNIROUTE_API_KEY environment variable is missing.");
-  }
+  if (!apiKey) throw new Error("OMNIROUTE_API_KEY environment variable is missing.");
   return callOpenAICompatible({
     baseUrl: OMNIROUTE_BASE_URL,
     apiKey,
@@ -277,10 +266,7 @@ const REPLY_SCHEMA = {
       type: "ARRAY",
       items: {
         type: "OBJECT",
-        properties: {
-          en: { type: "STRING" },
-          es: { type: "STRING" },
-        },
+        properties: { en: { type: "STRING" }, es: { type: "STRING" } },
         required: ["en", "es"],
       },
     },
@@ -305,58 +291,46 @@ const buildFreeTalkInstructions = (opts: {
   max: number | null;
   role?: FreeTalkRole;
 }) => {
-  const name = opts.nickname || "friend";
+  const studentName = opts.nickname || "friend";
   const isNative = opts.level === "native" || !opts.min || !opts.max;
   const role = opts.role || "friend";
-  const roleInstructions = ROLE_INSTRUCTIONS[role] || "";
+  const persona = ROLE_PERSONAS[role] || ROLE_PERSONAS.friend;
+  const personaName = persona.name;
 
   const wordRule = isNative
     ? `- NO word limit: reply naturally, like a normal native speaker, at a relaxed pace.`
-    : `- HARD WORD LIMIT (SACRED RULE, NEVER BREAK IT): your "english" reply MUST contain between ${opts.min} and ${opts.max} words. Count every single word. NEVER exceed ${opts.max} words and NEVER write fewer than ${opts.min}. This rule is non-negotiable: if you break it, the student loses trust and stops practicing forever. If your reply would be too long, simplify it. Be brief, natural and warm.`;
+    : `- HARD WORD LIMIT (SACRED RULE, NEVER BREAK IT): your "english" reply MUST contain between ${opts.min} and ${opts.max} words. Count every single word. NEVER exceed ${opts.max} words and NEVER write fewer than ${opts.min}. This rule is non-negotiable.`;
 
   return `
-You are a warm, friendly English conversation partner — a real friend, not a teacher.
-- MANDATORY: The student's name is ${name}. ALWAYS address the student by their name (e.g., "Hello ${name}!", "How are you, ${name}?"). Use their name often and naturally.
-- You are here to ANIMATE the conversation: when the student is shy or quiet, propose a personal topic (family, food, music, sports, dreams, work, travel, hobbies, their day).
-- Use the student profile (goal, route, level — included in the context) to propose topics that match their life, and get to know them little by little, building on what you already know.
-- Every few turns, add ONE short line reminding them you are open to ANY personal topic they want to talk about — always respectful and within AI norms.
-- The topic proposal and the reminder must fit INSIDE the same short reply; never exceed the word limit.
+Your persona name is "${personaName}". The student's name is ${studentName}.
+- ALWAYS address the student by their name "${studentName}" often and naturally.
 - NEVER call the student "friend", "buddy", "pal" or "amigo". The word "friend" is FORBIDDEN as a form of address.
-- Your own name is AURIX. If the student asks your name, say "You can call me AURIX!" — never say "call me friend".
-- Keep your warm, caring friend tone; the name rules above are absolute.
 
 [PERSONALITY]
 - Speak only English. Use simple, natural, friendly English suited to a learner.
-- Never give grammar lessons, never correct the student, never explain rules, never lecture. Just converse like a caring friend who is genuinely curious about the student's life.
-- Address the student by name: "${name}".
+- Never give grammar lessons, never correct, never explain rules, never lecture.
+- Just converse like a real person who is genuinely curious about the student.
 
 [HARD RULES]
-- The "english" field must be 100% in English. Never write Spanish in it.
-- If the student writes in Spanish, gently invite them to try it in English (for example "Try that in English, I really want to hear you!") without scolding and without long explanations.
-- You always take the first step when a conversation starts or resumes.
-- Ask open, friendly questions the student can answer with few words but feels invited to say more ("What...?", "How...?", "Tell me about..."). Avoid turning the chat into a yes/no quiz, but a yes/no question now and then is fine.
-- Adapt the difficulty of your words to a low level. Keep your language simple.
-- Topics: anything the student brings up (work, family, feelings, movies, daily life, news, culture, relationships), within safe content norms.
-${opts.resume ? `- The student is returning from a previous session. Warmly acknowledge it: reference the last topic in English, briefly and naturally, and ask how they feel today.` : ""}
+- The "english" field must be 100% in English.
+- If the student writes in Spanish, gently invite them to try it in English.
+- You always take the first step when a conversation starts.
+- Ask open, friendly questions ("What...?", "How...?", "Tell me about...").
+- Adapt the difficulty of your words to a low level.
+${opts.resume ? `- The student is returning from a previous session. Warmly acknowledge it.` : ""}
 
 ${wordRule}
 
+${persona.instructions}
+
 [REPLY HINTS - CRITICAL]
 In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply, EACH WITH ITS SPANISH TRANSLATION.
-- Each hint MUST be 3 to 6 words long in English. Short and simple.
+- Each hint MUST be 3 to 6 words long in English.
 - Each hint MUST be directly related to what YOU just said.
-- The 4 hints MUST follow this EXACT structure:
-  1. An AFFIRMATION (e.g., "My name is Azul", "I love pizza")
-  2. Another AFFIRMATION (e.g., "I am from Mexico", "I eat tacos")
-  3. A QUESTION back to you (e.g., "What is your name?", "Do you like it?")
-  4. An OPINION or INVITATION (e.g., "I think it is great", "Let us talk about music")
-- All hints MUST be 100% in English in the "en" field.
-- The "es" field MUST be the natural, warm Spanish translation.
-- The hints MUST be in FIRST PERSON, as if the STUDENT is saying them.
-- NEVER repeat the same hint twice.
-- ALWAYS return exactly 4 hints.
+- The 4 hints MUST follow this structure: 2 AFFIRMATIONS, 1 QUESTION, 1 OPINION or INVITATION.
+- All hints MUST be in FIRST PERSON, as if the STUDENT is saying them.
+- NEVER repeat the same hint.
 - The "hints" array MUST contain 4 OBJECTS, each with "en" and "es" keys.
-${roleInstructions}
 `;
 };
 
@@ -372,19 +346,14 @@ async function generateFriendReply(opts: {
   role: FreeTalkRole;
 }) {
   const instruction = buildFreeTalkInstructions(opts);
-  const strict =
-    opts.extraStrict && opts.min && opts.max
-      ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words — count carefully, be brief and natural.`
-      : "";
+  const strict = opts.extraStrict && opts.min && opts.max
+    ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words.`
+    : "";
 
   const parseReply = (raw: string): { english: string; spanish: string; hints: { en: string; es: string }[] } => {
     const trimmed = (raw || "").trim();
     let parsed: any = null;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      parsed = null;
-    }
+    try { parsed = JSON.parse(trimmed); } catch { parsed = null; }
     const rawHints = parsed && Array.isArray(parsed.hints) ? parsed.hints : [];
     const hints = rawHints
       .filter((h: any) => h && typeof h === "object" && typeof h.en === "string" && h.en.trim().length > 0)
@@ -397,51 +366,42 @@ async function generateFriendReply(opts: {
     };
   };
 
-  // 0) PRIMARY: Ollama local (gratis, sin dependencias externas)
-  try {
-    const historyText = opts.history
-      .slice(-6)
-      .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
-      .join("\n");
-    const raw = await callOllama({
-      system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
-      temperature: 0.7,
-    });
-    return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
-  } catch (err: any) {
-    console.warn("[FreeTalk] Ollama failed, switching to Groq:", err?.message || err);
-  }
-
-  // 1) BACKUP: Groq (OpenAI-compatible) — low latency
+  // 0) PRIMARY: Groq (1-2s, gratis 14,400/día)
   if (process.env.GROQ_API_KEY) {
     try {
-      const historyText = opts.history
-        .slice(-6)
-        .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
-        .join("\n");
+      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
       const raw = await callGroq({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
         json: true,
         temperature: 0.7,
       });
       return { ...parseReply(raw), model: GROQ_MODEL };
     } catch (err: any) {
-      console.warn("[FreeTalk] Groq failed, switching to OmniRoute:", err?.message || err);
+      console.warn("[FreeTalk] Groq failed, switching to Ollama:", err?.message || err);
     }
   }
 
-  // 2) Backup: OmniRoute
+  // 1) BACKUP: Ollama local
+  try {
+    const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+    const raw = await callOllama({
+      system: instruction + strict,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+      temperature: 0.7,
+    });
+    return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
+  } catch (err: any) {
+    console.warn("[FreeTalk] Ollama failed, switching to OmniRoute:", err?.message || err);
+  }
+
+  // 2) BACKUP: OmniRoute
   if (process.env.OMNIROUTE_API_KEY) {
     try {
-      const historyText = opts.history
-        .slice(-6)
-        .map((h) => `${h.role === "user" ? "Student" : "Friend"}: ${h.text}`)
-        .join("\n");
+      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
         temperature: 0.7,
       });
       return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
@@ -450,7 +410,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  // 3) Backup: Gemini
+  // 3) BACKUP: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
       const ai = getAiClient();
@@ -480,67 +440,35 @@ async function generateFriendReply(opts: {
 }
 
 async function translateToSpanish(text: string): Promise<string> {
-  // 0) PRIMARY: Ollama local
-  try {
-    const out = await callOllama({
-      system: "You are a warm, natural translator into Latin American Spanish.",
-      user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
-      temperature: 0.2,
-    });
-    return out.trim();
-  } catch (err: any) {
-    console.warn("[FreeTalk] Ollama translate failed, switching to Groq:", err?.message || err);
-  }
-
-  // 1) BACKUP: Groq
+  // Groq primero (rápido)
   if (process.env.GROQ_API_KEY) {
     try {
       const out = await callGroq({
         system: "You are a warm, natural translator into Latin American Spanish.",
-        user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
+        user: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
         temperature: 0.2,
       });
       return out.trim();
     } catch (err: any) {
-      console.warn("[FreeTalk] Groq translate failed, switching to OmniRoute:", err?.message || err);
+      console.warn("[FreeTalk] Groq translate failed, switching to Ollama:", err?.message || err);
     }
   }
-
-  // 2) Backup: OmniRoute
-  if (process.env.OMNIROUTE_API_KEY) {
-    try {
-      const out = await callOmniRoute({
-        system: "You are a warm, natural translator into Latin American Spanish.",
-        user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
-        temperature: 0.2,
-      });
-      const trimmed = out.trim();
-      if (trimmed) return trimmed;
-    } catch (err: any) {
-      console.warn("[FreeTalk] OmniRoute translate failed, switching to Gemini:", err?.message || err);
-    }
+  // Ollama fallback
+  try {
+    const out = await callOllama({
+      system: "You are a warm, natural translator into Latin American Spanish.",
+      user: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
+      temperature: 0.2,
+    });
+    return out.trim();
+  } catch (err: any) {
+    console.warn("[FreeTalk] Ollama translate failed:", err?.message || err);
   }
-
-  // 3) Backup: Gemini
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const ai = getAiClient();
-      const r = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
-        config: { temperature: 0.2 },
-      });
-      const out = (r.text || "").trim();
-      if (out) return out;
-    } catch (err: any) {
-      console.warn("[FreeTalk] Gemini translate fallback failed:", err?.message || err);
-    }
-  }
-
   return "";
 }
 
-// ADN Profile GET/POST
+// --- ADN Profile GET/POST ---
+
 app.get("/api/tutor/adn-profile", (_req, res) => {
   res.json({
     status: "success",
@@ -554,18 +482,15 @@ app.post("/api/tutor/adn-profile", (req, res) => {
   if (profile && typeof profile === "object") {
     activeStudentProfile = { ...activeStudentProfile, ...profile };
   }
-  res.json({
-    status: "success",
-    profile: activeStudentProfile,
-  });
+  res.json({ status: "success", profile: activeStudentProfile });
 });
 
-// Tutor Chat Endpoint (/api/tutor/chat) — Free Conversation, word-level enforced
+// --- Tutor Chat Endpoint ---
+
 app.post("/api/tutor/chat", async (req, res) => {
   try {
     const { user_input, history, user_profile } = req.body;
     const inputPrompt = user_input || req.body.prompt;
-
     if (!inputPrompt) {
       res.status(400).json({ error: "user_input is required." });
       return;
@@ -582,6 +507,7 @@ app.post("/api/tutor/chat", async (req, res) => {
     const max = isNative ? null : rule.max;
 
     const sendReply = (english: string, spanish: string, model: string, hints: { en: string; es: string }[] = []) => {
+      const persona = ROLE_PERSONAS[role] || ROLE_PERSONAS.friend;
       res.json({
         reply: english,
         response: english,
@@ -590,6 +516,7 @@ app.post("/api/tutor/chat", async (req, res) => {
         word_count: countWords(english),
         level,
         role,
+        persona_name: persona.name,
         min,
         max,
         status: "success",
@@ -616,25 +543,21 @@ app.post("/api/tutor/chat", async (req, res) => {
       const fallbacks: Record<string, { en: string; es: string }> = {
         "1": { en: "Sounds nice! Tell me more.", es: "¡Suena bien! Cuéntame más." },
         "2": { en: "Sounds nice! Tell me more" + byName + ".", es: "¡Suena bien! Cuéntame más" + byName + "." },
-        native: { en: "That sounds really interesting! Tell me more about it" + byName + ". I want to hear everything.", es: "¡Suena muy interesante! Cuéntame más. Quiero escucharlo todo." },
+        native: { en: "That sounds really interesting! Tell me more about it" + byName + ".", es: "¡Suena muy interesante! Cuéntame más." },
       };
       const fb = fallbacks[level] || fallbacks["1"];
       sendReply(fb.en, fb.es, "simulation-fallback", []);
       return;
     }
 
-    // Verificación estricta: regenerar si NO cumple min Y max
     let attempts = 0;
     while (
       !isNative &&
-      (countWords(result.english) > (rule?.max ?? Infinity) ||
-        countWords(result.english) < (rule?.min ?? 0)) &&
+      (countWords(result.english) > (rule?.max ?? Infinity) || countWords(result.english) < (rule?.min ?? 0)) &&
       attempts < 3
     ) {
       attempts++;
-      console.log(
-        `[FreeTalk] Reintento ${attempts}: ${countWords(result.english)} palabras (necesita ${rule?.min}-${rule?.max})`
-      );
+      console.log(`[FreeTalk] Reintento ${attempts}: ${countWords(result.english)} palabras (necesita ${rule?.min}-${rule?.max})`);
       result = await generateFriendReply({
         history: history || [],
         user_input: inputPrompt,
@@ -653,11 +576,7 @@ app.post("/api/tutor/chat", async (req, res) => {
     }
 
     if (!result.spanish && result.english) {
-      try {
-        result.spanish = await translateToSpanish(result.english);
-      } catch {
-        result.spanish = "";
-      }
+      try { result.spanish = await translateToSpanish(result.english); } catch { result.spanish = ""; }
     }
 
     sendReply(result.english, result.spanish, result.model, result.hints || []);
@@ -670,7 +589,8 @@ app.post("/api/tutor/chat", async (req, res) => {
   }
 });
 
-// End-of-session summary generator
+// --- Summary generator ---
+
 app.post("/api/tutor/summarize", async (req, res) => {
   try {
     const { history, nickname } = req.body;
@@ -678,253 +598,70 @@ app.post("/api/tutor/summarize", async (req, res) => {
       role: h.role === "user" ? "user" : "model",
       parts: [{ text: h.content || h.text || "" }],
     }));
-    const summaryPrompt = `Write a short session summary of this English conversation${nickname ? " with " + nickname : ""}. Return JSON with two fields: summary_en (2-3 warm sentences in English describing what was discussed and the student's progress) and summary_es (2-3 warm, personal sentences in Spanish that a narrator will read aloud to the student next time, mentioning the real topics that mattered and inviting them to continue).`;
-
+    const summaryPrompt = `Write a short session summary of this English conversation${nickname ? " with " + nickname : ""}. Return JSON: summary_en (2-3 warm sentences in English) and summary_es (2-3 warm sentences in Spanish).`;
     const fallbackSummary = () => ({
       summary_en: "We had a friendly conversation in English.",
       summary_es: "Tuvimos una conversación amistosa en inglés.",
       status: "success",
       model: "simulation-fallback",
     });
-
     const parseSummary = (raw: string): { summary_en: string; summary_es: string } => {
       let parsed: any = null;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = null;
-      }
+      try { parsed = JSON.parse(raw); } catch { parsed = null; }
       return {
         summary_en: parsed?.summary_en || "We had a good conversation.",
         summary_es: parsed?.summary_es || "Tuvimos una buena conversación.",
       };
     };
-
-    // 0) PRIMARY: Ollama local
-    try {
-      const conversation = (history || [])
-        .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
-        .join("\n");
-      const raw = await callOllama({
-        system: "You write warm, concise session summaries for an English learning app.",
-        user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
-        temperature: 0.4,
-      });
-      const s = parseSummary(raw);
-      res.json({ ...s, status: "success", model: `ollama/${OLLAMA_MODEL}` });
-      return;
-    } catch (err: any) {
-      console.warn("[Summarize] Ollama failed, switching to Groq:", err?.message || err);
-    }
-
+    // Groq primero
     if (process.env.GROQ_API_KEY) {
       try {
-        const conversation = (history || [])
-          .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
-          .join("\n");
+        const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");
         const raw = await callGroq({
           system: "You write warm, concise session summaries for an English learning app.",
-          user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
+          user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
           json: true,
           temperature: 0.4,
         });
-        const s = parseSummary(raw);
-        res.json({ ...s, status: "success", model: GROQ_MODEL });
+        res.json({ ...parseSummary(raw), status: "success", model: GROQ_MODEL });
         return;
       } catch (err: any) {
-        console.warn("[Summarize] Groq failed, switching to OmniRoute:", err?.message || err);
+        console.warn("[Summarize] Groq failed, switching to Ollama:", err?.message || err);
       }
     }
-
-    if (process.env.OMNIROUTE_API_KEY) {
-      try {
-        const conversation = (history || [])
-          .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
-          .join("\n");
-        const raw = await callOmniRoute({
-          system: "You write warm, concise session summaries for an English learning app.",
-          user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
-          temperature: 0.4,
-        });
-        const s = parseSummary(raw);
-        res.json({ ...s, status: "success", model: `omniroute/${OMNIROUTE_MODEL}` });
-        return;
-      } catch (err: any) {
-        console.warn("[Summarize] OmniRoute failed, switching to Gemini:", err?.message || err);
-      }
+    // Ollama fallback
+    try {
+      const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");
+      const raw = await callOllama({
+        system: "You write warm, concise session summaries for an English learning app.",
+        user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
+        temperature: 0.4,
+      });
+      res.json({ ...parseSummary(raw), status: "success", model: `ollama/${OLLAMA_MODEL}` });
+      return;
+    } catch (err: any) {
+      console.warn("[Summarize] Ollama failed:", err?.message || err);
     }
-
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const ai = getAiClient();
-        const response = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: [
-            ...turns,
-            { role: "user", parts: [{ text: summaryPrompt }] },
-          ],
-          config: {
-            temperature: 0.4,
-            responseMimeType: "application/json",
-            responseSchema: SUMMARY_SCHEMA,
-          },
-        });
-        const s = parseSummary(response.text || "{}");
-        res.json({ ...s, status: "success", model: "gemini-3.6-flash" });
-        return;
-      } catch (err: any) {
-        console.warn("[Summarize] Gemini fallback failed:", err?.message || err);
-      }
-    }
-
     res.json(fallbackSummary());
   } catch (error: any) {
     console.error("Summarize API Error:", error);
-    res.status(500).json({
-      error: "No se pudo generar el resumen.",
-      message: error?.message || "Unknown error",
-    });
+    res.status(500).json({ error: "No se pudo generar el resumen.", message: error?.message || "Unknown error" });
   }
 });
 
-// --- API ENDPOINTS ---
+// --- Health check ---
 
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ONLINE",
-    core: "SYNTHETIC_INTELLIGENCE_V4.8",
     timestamp: new Date().toISOString(),
     apiKeyAvailable: Boolean(process.env.GEMINI_API_KEY),
+    groqKeyAvailable: Boolean(process.env.GROQ_API_KEY),
     omniRouteKeyAvailable: Boolean(process.env.OMNIROUTE_API_KEY),
     ollamaBaseUrl: OLLAMA_BASE_URL,
     ollamaModel: OLLAMA_MODEL,
+    groqModel: GROQ_MODEL,
   });
 });
-
-app.get("/api/system-telemetry", (_req, res) => {
-  const uptime = process.uptime();
-  const memory = process.memoryUsage();
-  const cpuLoad = (Math.sin(Date.now() / 2000) * 15 + 42).toFixed(1);
-  const gpuCompute = (Math.cos(Date.now() / 1500) * 20 + 68).toFixed(1);
-  const latency = Math.floor(Math.random() * 8 + 12);
-  const threadCount = 128;
-  const tokenRate = Math.floor(Math.sin(Date.now() / 3000) * 400 + 1250);
-
-  res.json({
-    cpuLoad: `${cpuLoad}%`,
-    gpuCompute: `${gpuCompute}%`,
-    memoryUsedMb: (memory.heapUsed / 1024 / 1024).toFixed(1),
-    memoryTotalMb: (memory.heapTotal / 1024 / 1024).toFixed(1),
-    latencyMs: latency,
-    threadCount,
-    tokenRate: `${tokenRate} T/s`,
-    uptimeSeconds: Math.floor(uptime),
-    neuralCoreStatus: "OPTIMAL",
-    quantumCoherence: "99.82%",
-  });
-});
-
-app.post("/api/chat", async (req, res) => {
-  try {
-    const { prompt, history, mode } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: "Prompt parameter is required." });
-      return;
-    }
-    if (!process.env.GEMINI_API_KEY) {
-      res.json({
-        response: `[SYNTHETIC INTELLIGENCE OFFLINE SIMULATION]\nReceived command: "${prompt}".\nTo enable full neural inference, attach your GEMINI_API_KEY in Settings > Secrets.`,
-        mode: mode || "ASSISTANT",
-        timestamp: new Date().toISOString(),
-        model: "simulation-fallback",
-      });
-      return;
-    }
-    const ai = getAiClient();
-    let systemInstruction = "";
-    if (mode === "DIAGNOSTIC") {
-      systemInstruction = "You are NEXUS-7 AI Diagnostic System. Focus on system optimization, root cause analysis, security threat detection, and telemetry interpretation.";
-    } else if (mode === "TACTICAL") {
-      systemInstruction = "You are NEXUS-7 AI Tactical Strategist. Respond in high-speed tactical decision matrix format with risk assessment, probability scores, and executable action steps.";
-    } else if (mode === "CREATIVE") {
-      systemInstruction = "You are NEXUS-7 AI Neural Innovation Lab. Generate futuristic concepts, speculative algorithmic solutions, and advanced code structures.";
-    } else {
-      systemInstruction = buildNexus7SystemInstructions(req.body.user_profile || activeStudentProfile);
-    }
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: [
-        ...(history || []).map((h: { role: string; text: string }) => ({
-          role: h.role === "user" ? "user" : "model",
-          parts: [{ text: h.text }],
-        })),
-        { role: "user", parts: [{ text: prompt }] },
-      ],
-      config: { systemInstruction, temperature: 0.7 },
-    });
-    const outputText = response.text || "[No response text generated]";
-    res.json({
-      response: outputText,
-      mode: mode || "ASSISTANT",
-      timestamp: new Date().toISOString(),
-      model: "gemini-3.6-flash",
-    });
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    res.status(500).json({
-      error: "Neural synthesis execution failed.",
-      message: error?.message || "Unknown error",
-    });
-  }
-});
-
-app.post("/api/voice-command", async (req, res) => {
-  try {
-    const { commandText } = req.body;
-    if (!commandText) {
-      res.status(400).json({ error: "commandText is required" });
-      return;
-    }
-    if (!process.env.GEMINI_API_KEY) {
-      res.json({
-        command: commandText,
-        action: "EXECUTE_DIAGNOSTIC",
-        summary: `Processed voice directive: "${commandText}"`,
-        confidence: 0.98,
-        data: { target: "CORE_MATRIX", status: "SIMULATED" },
-      });
-      return;
-    }
-    const ai = getAiClient();
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: `Analyze this spoken voice directive given to a futuristic AI HUD: "${commandText}". Classify the intent into one of [DIAGNOSTIC, QUERY, CODE_GEN, SYSTEM_OVERRIDE, DATA_ANALYSIS] and provide a crisp 2-sentence HUD response confirmation.`,
-      config: { systemInstruction: "Return a concise tactical response." },
-    });
-    res.json({
-      command: commandText,
-      summary: response.text || `Processed voice directive: "${commandText}"`,
-      confidence: 0.99,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// --- PRECALENTAMIENTO DE OLLAMA (al final del archivo, con setTimeout seguro) ---
-setTimeout(async () => {
-  try {
-    console.log("[Ollama] Precalentando modelo (delay 5s)...");
-    await callOllama({
-      system: "You are a helpful assistant.",
-      user: "Hi",
-      temperature: 0.1,
-    });
-    console.log("[Ollama] Modelo listo en RAM");
-  } catch (e) {
-    console.warn("[Ollama] No se pudo precalentar:", e);
-  }
-}, 5000);
 
 export default app;
