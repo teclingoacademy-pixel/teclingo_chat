@@ -1,5 +1,6 @@
 export type FreeTalkLevel = "1" | "2" | "native";
 export type FreeTalkSpeed = "0.5" | "0.7" | "1.0";
+export type FreeTalkRole = "friend" | "stranger" | "cafe" | "coworker" | "classmate" | "party";
 
 export interface FreeTalkTurn {
   role: "user" | "assistant";
@@ -13,6 +14,7 @@ export interface ChatReply {
   reply_hints?: { en: string; es: string }[];
   word_count: number;
   level: string;
+  role?: FreeTalkRole;
   min: number | null;
   max: number | null;
   status: string;
@@ -25,6 +27,7 @@ const LS = {
   nickname: "ft_nickname",
   level: "ft_level",
   speed: "ft_speed",
+  role: "ft_role",
   ready: "ft_ready",
   started: "ft_started",
   completed: "ft_completed",
@@ -37,6 +40,15 @@ export const LEVEL_LABELS: Record<FreeTalkLevel, { label: string; range: string 
   "1": { label: "Nivel 1", range: "3 a 5 palabras" },
   "2": { label: "Nivel 2", range: "4 a 7 palabras" },
   native: { label: "Modo nativo", range: "Sin filtro" },
+};
+
+export const ROLE_LABELS: Record<FreeTalkRole, { label: string; emoji: string; description: string }> = {
+  friend: { label: "Amigo", emoji: "👥", description: "Conversación libre con AURIX" },
+  stranger: { label: "Extranjero", emoji: "🌍", description: "Conoce a alguien en un viaje" },
+  cafe: { label: "Café", emoji: "☕", description: "Pide en un café o restaurante" },
+  coworker: { label: "Compañero de trabajo", emoji: "💼", description: "Small talk en la oficina" },
+  classmate: { label: "Compañero de escuela", emoji: "🎓", description: "Conoce a alguien en clase" },
+  party: { label: "Fiesta", emoji: "🎉", description: "Conoce gente en un evento" },
 };
 
 export const freeTalkStore = {
@@ -55,7 +67,6 @@ export const freeTalkStore = {
   getLevel(): FreeTalkLevel {
     const v = localStorage.getItem(LS.level) as FreeTalkLevel | string | null;
     if (!v) return "1";
-    // Migrar "3" obsoleto a "native"
     if (v === "3") {
       localStorage.setItem(LS.level, "native");
       return "native";
@@ -71,6 +82,13 @@ export const freeTalkStore = {
   },
   setSpeed(s: FreeTalkSpeed) {
     localStorage.setItem(LS.speed, s);
+  },
+  getRole(): FreeTalkRole {
+    const v = localStorage.getItem(LS.role) as FreeTalkRole | null;
+    return v && ["friend", "stranger", "cafe", "coworker", "classmate", "party"].includes(v) ? v : "friend";
+  },
+  setRole(r: FreeTalkRole) {
+    localStorage.setItem(LS.role, r);
   },
   isReady(): boolean {
     return localStorage.getItem(LS.ready) === "true";
@@ -127,11 +145,12 @@ export async function sendFreeTalkMessage(
   opts: {
     level: FreeTalkLevel;
     nickname: string;
+    role?: FreeTalkRole;
     resume?: string;
   }
 ): Promise<ChatReply> {
   const ctrl = new AbortController();
-  const chatTimer = setTimeout(() => ctrl.abort(), 20000);
+  const chatTimer = setTimeout(() => ctrl.abort(), 60000);
   const res = await fetch("/api/tutor/chat", {
     signal: ctrl.signal,
     method: "POST",
@@ -141,6 +160,7 @@ export async function sendFreeTalkMessage(
       history,
       response_level: opts.level,
       nickname: opts.nickname,
+      role: opts.role || "friend",
       resume_summary: opts.resume || null,
     }),
   });
