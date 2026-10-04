@@ -304,7 +304,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
   // Mostrar el modal de bienvenida para usuarios nuevos
   useEffect(() => {
-    if (phase === "onboarding" && !freeTalkStore.getSummary().es) {
+    const HAS_SEEN_WELCOME_KEY = 'venus_has_seen_welcome';
+    const hasSeenWelcome = localStorage.getItem(HAS_SEEN_WELCOME_KEY) === 'true';
+    const hasNickname = Boolean(freeTalkStore.getNickname());
+    if (phase === "onboarding" && !hasSeenWelcome && !hasNickname) {
       setShowWelcomeModal(true);
     }
   }, []);
@@ -753,6 +756,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   };
 
   const handleWelcomeStart = () => {
+    localStorage.setItem('venus_has_seen_welcome', 'true');
     setShowWelcomeModal(false);
     try {
       const u = new SpeechSynthesisUtterance(' ');
