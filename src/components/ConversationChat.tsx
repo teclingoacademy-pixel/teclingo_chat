@@ -4,13 +4,15 @@ import {
   generateSessionSummary,
   freeTalkStore,
   LEVEL_LABELS,
+  ROLE_LABELS,
   FreeTalkLevel,
   FreeTalkSpeed,
+  FreeTalkRole,
   FreeTalkTurn,
   STORAGE_VERSION,
 } from "../services/freeTalkService";
 import * as Identity from "../services/identityService";
-import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, RotateCcw, X, Sparkles } from "lucide-react";
+import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, X, Sparkles } from "lucide-react";
 
 type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
 const CLOUD_API = "https://script.google.com/macros/s/AKfycbw0VN6XVNz_qdEx6zmAI5YMTPQG7acYcssVqBC4q5WO0vjbXV0H8oHqfbUZWURhIHhE/exec";
@@ -33,17 +35,12 @@ const SUGGESTIONS = [
 ];
 
 function cleanTTS(text: string): string {
-  return text
-    .replace(/[*_~`#]/g, "")
-    .replace(/\n+/g, ". ")
-    .trim();
+  return text.replace(/[*_~`#]/g, "").replace(/\n+/g, ". ").trim();
 }
 
 let VOICES_CACHE: SpeechSynthesisVoice[] = [];
 function refreshVoices() {
-  if ("speechSynthesis" in window) {
-    VOICES_CACHE = window.speechSynthesis.getVoices();
-  }
+  if ("speechSynthesis" in window) VOICES_CACHE = window.speechSynthesis.getVoices();
 }
 if (typeof window !== "undefined" && "speechSynthesis" in window) {
   refreshVoices();
@@ -51,19 +48,13 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
 }
 
 const EN_NATURAL = [
-  "Microsoft Aria Online (Natural)",
-  "Microsoft Jenny Online (Natural)",
-  "Microsoft Ashley Online (Natural)",
-  "Microsoft Andrew Online (Natural)",
-  "Google US English",
+  "Microsoft Aria Online (Natural)", "Microsoft Jenny Online (Natural)",
+  "Microsoft Ashley Online (Natural)", "Microsoft Andrew Online (Natural)", "Google US English",
 ];
 const ES_NATURAL = [
-  "Microsoft Jorge Online (Natural)",
-  "Microsoft Alvaro Online (Natural)",
-  "Microsoft Sabina Online (Natural)",
-  "Microsoft Dalia Online (Natural)",
-  "Google español de Estados Unidos",
-  "Google español",
+  "Microsoft Jorge Online (Natural)", "Microsoft Alvaro Online (Natural)",
+  "Microsoft Sabina Online (Natural)", "Microsoft Dalia Online (Natural)",
+  "Google español de Estados Unidos", "Google español",
 ];
 
 function pickNaturalVoice(lang: string): SpeechSynthesisVoice | null {
@@ -103,22 +94,14 @@ function buildReplyHints(text: string): { en: string; es: string }[] {
     out.push(H("I like action movies!", "¡Me gustan las películas de acción!"));
     out.push(H("What is your favorite movie?", "¿Cuál es tu película favorita?"));
     out.push(H("I watched it yesterday.", "La vi ayer."));
-  } else if (t.includes("family") || t.includes("brother") || t.includes("sister") || t.includes("mother") || t.includes("father")) {
+  } else if (t.includes("family") || t.includes("brother") || t.includes("sister")) {
     out.push(H("I have two brothers.", "Tengo dos hermanos."));
     out.push(H("My family is small.", "Mi familia es pequeña."));
     out.push(H("Tell me about your family!", "¡Cuéntame de tu familia!"));
-  } else if (t.includes("job") || t.includes("work") || t.includes("teacher") || t.includes("teach")) {
+  } else if (t.includes("job") || t.includes("work") || t.includes("teacher")) {
     out.push(H("I am a teacher.", "Soy maestro."));
     out.push(H("I work from home.", "Trabajo desde casa."));
     out.push(H("What do you do?", "¿A qué te dedicas?"));
-  } else if (t.includes("tired") || t.includes("sleep") || t.includes("busy")) {
-    out.push(H("I had a long day.", "Tuve un día largo."));
-    out.push(H("I need some rest.", "Necesito descansar."));
-    out.push(H("But I feel better now!", "¡Pero ya me siento mejor!"));
-  } else if (t.includes("sport") || t.includes("play") || t.includes("game")) {
-    out.push(H("I play soccer!", "¡Juego fútbol!"));
-    out.push(H("What is your favorite sport?", "¿Cuál es tu deporte favorito?"));
-    out.push(H("I like watching games.", "Me gusta ver partidos."));
   } else if (t.endsWith("?")) {
     const m = t.match(/^(is|are|am|do|does|did|can|will)\b/);
     if (m) {
@@ -161,29 +144,52 @@ const MicOrb: React.FC<{
   state: "idle" | "listening" | "processing" | "speaking";
   onClick: () => void;
   title?: string;
-}> = ({ state, onClick, title }) => (
+  color: string;
+}> = ({ state, onClick, title, color }) => (
   <div className="relative flex items-center justify-center select-none" style={{ width: 190, height: 190 }}>
-    <div className="absolute w-[190px] h-[190px] rounded-full bg-gradient-to-r from-[#00f0ff]/30 via-[#4facfe]/25 to-[#7f00ff]/30 blur-3xl" />
-    <div className={`absolute w-[160px] h-[160px] rounded-full border transition-all duration-500 ${state === "listening" ? "border-[#00f0ff]/60 animate-ping opacity-50" : "border-[#00f0ff]/20"}`} />
+    <div
+      className="absolute w-[190px] h-[190px] rounded-full blur-3xl transition-colors duration-500"
+      style={{ backgroundColor: color, opacity: 0.3 }}
+    />
+    <div
+      className={`absolute w-[160px] h-[160px] rounded-full border transition-all duration-500 ${
+        state === "listening" ? "animate-ping opacity-50" : "opacity-20"
+      }`}
+      style={{ borderColor: color }}
+    />
     <div className="absolute w-[150px] h-[150px] rounded-full border border-[#7f00ff]/40" />
     <button
       onClick={onClick}
       title={title}
-      className="relative w-[130px] h-[130px] rounded-full bg-gradient-to-tr from-[#00f2fe] via-[#4facfe] to-[#7f00ff] p-[2.5px] shadow-[0_0_45px_rgba(0,242,254,0.45)] transition-transform duration-500 group"
+      className="relative w-[130px] h-[130px] rounded-full p-[2.5px] transition-all duration-500 group"
+      style={{
+        background: `linear-gradient(135deg, ${color}, #7f00ff)`,
+        boxShadow: `0 0 45px ${color}73`,
+      }}
     >
       <div className="w-full h-full rounded-full bg-[#0a0c12] flex items-center justify-center overflow-hidden shadow-inner">
         {state === "speaking" ? (
           <div className="flex items-center space-x-1.5">
-            <span className="w-1.5 h-5 bg-[#00f0ff] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-            <span className="w-1.5 h-8 bg-[#00f0ff] rounded-full animate-bounce" style={{ animationDelay: "120ms" }} />
-            <span className="w-1.5 h-10 bg-[#7f00ff] rounded-full animate-bounce" style={{ animationDelay: "240ms" }} />
-            <span className="w-1.5 h-6 bg-[#00f0ff] rounded-full animate-bounce" style={{ animationDelay: "360ms" }} />
+            <span className="w-1.5 h-5 rounded-full animate-bounce" style={{ backgroundColor: color, animationDelay: "0ms" }} />
+            <span className="w-1.5 h-8 rounded-full animate-bounce" style={{ backgroundColor: color, animationDelay: "120ms" }} />
+            <span className="w-1.5 h-10 rounded-full animate-bounce" style={{ backgroundColor: color, animationDelay: "240ms" }} />
+            <span className="w-1.5 h-6 rounded-full animate-bounce" style={{ backgroundColor: color, animationDelay: "360ms" }} />
           </div>
         ) : state === "processing" ? (
-          <Sparkles className="w-8 h-8 text-[#00f0ff] animate-spin" />
+          <Sparkles className="w-8 h-8 animate-spin" style={{ color }} />
         ) : (
-          <div className={`p-3 rounded-full bg-[#0a0c12]/60 border border-[#00f0ff]/40 group-hover:border-[#00f0ff] transition-all ${state === "listening" ? "shadow-[0_0_20px_rgba(0,242,254,0.5)]" : ""}`}>
-            {state === "listening" ? <MicOff className="w-7 h-7 text-[#00f0ff] animate-pulse" /> : <Mic className="w-7 h-7 text-[#00f0ff]" />}
+          <div
+            className={`p-3 rounded-full bg-[#0a0c12]/60 border transition-all`}
+            style={{
+              borderColor: `${color}66`,
+              boxShadow: state === "listening" ? `0 0 20px ${color}80` : undefined,
+            }}
+          >
+            {state === "listening" ? (
+              <MicOff className="w-7 h-7 animate-pulse" style={{ color }} />
+            ) : (
+              <Mic className="w-7 h-7" style={{ color }} />
+            )}
           </div>
         )}
       </div>
@@ -197,6 +203,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [nickname, setNickname] = useState<string>("");
   const [level, setLevel] = useState<FreeTalkLevel>("1");
   const [speed, setSpeed] = useState<FreeTalkSpeed>("0.7");
+  const [role, setRole] = useState<FreeTalkRole>("friend");
   const [messages, setMessages] = useState<FreeTalkTurn[]>([]);
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -217,18 +224,15 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     try { return localStorage.getItem("ft_hint_translations") === "true"; } catch { return false; }
   });
 
-  // Modal de instrucciones iniciales
   const [showWelcomeModal, setShowWelcomeModal] = useState(true);
   const welcomeShownRef = useRef(false);
 
-  // Modal de instrucciones de la sesión (antes del kickoff)
   const [showSessionInfoModal, setShowSessionInfoModal] = useState(false);
   const [skipSessionInfo, setSkipSessionInfo] = useState<boolean>(() => {
     try { return localStorage.getItem(SKIP_SESSION_INFO_KEY) === "true"; } catch { return false; }
   });
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
-  // Modal de código de acceso
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [accessCode, setAccessCode] = useState("");
   const [codeError, setCodeError] = useState("");
@@ -251,78 +255,47 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const MIN_MESSAGES_TO_SAVE = 3;
   const INACTIVITY_SAVE_MS = 10 * 60 * 1000;
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+  const roleData = ROLE_LABELS[role] || ROLE_LABELS.friend;
+  const activeColor = roleData.color;
+  const activePersonaName = roleData.personaName;
+
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   useEffect(() => {
-    if (phase === "conversation") {
-      listEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (phase === "conversation") listEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, phase, isProcessing]);
 
   const stopSpeaking = useCallback(() => {
-    if (speechTimerRef.current) {
-      clearTimeout(speechTimerRef.current);
-      speechTimerRef.current = null;
-    }
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
+    if (speechTimerRef.current) { clearTimeout(speechTimerRef.current); speechTimerRef.current = null; }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     speechRef.current = null;
     setIsSpeaking(false);
     setNarratorBusy(false);
   }, []);
 
-  // speakNow con callback onend opcional
   const speakNow = useCallback(
     (text: string, lang: string, rate: number, onEnd?: () => void) => {
-      if (!("speechSynthesis" in window)) {
-        setNarratorBusy(false);
-        if (onEnd) onEnd();
-        return;
-      }
+      if (!("speechSynthesis" in window)) { setNarratorBusy(false); if (onEnd) onEnd(); return; }
       window.speechSynthesis.cancel();
       const clean = cleanTTS(text);
-      if (!clean) {
-        setNarratorBusy(false);
-        if (onEnd) onEnd();
-        return;
-      }
+      if (!clean) { setNarratorBusy(false); if (onEnd) onEnd(); return; }
       const u = new SpeechSynthesisUtterance(clean);
       u.lang = lang;
       u.rate = rate;
       u.pitch = 1;
       const picked = pickNaturalVoice(lang);
-      if (picked) {
-        u.voice = picked;
-        u.lang = picked.lang;
-      }
+      if (picked) { u.voice = picked; u.lang = picked.lang; }
       const fallbackMs = Math.min(30000, Math.max(2000, Math.ceil(clean.length / 14) * 1000));
-      speechTimerRef.current = setTimeout(() => {
-        setNarratorBusy(false);
-        if (onEnd) onEnd();
-      }, fallbackMs);
-      u.onstart = () => {
-        setIsSpeaking(true);
-        setNarratorBusy(true);
-      };
+      speechTimerRef.current = setTimeout(() => { setNarratorBusy(false); if (onEnd) onEnd(); }, fallbackMs);
+      u.onstart = () => { setIsSpeaking(true); setNarratorBusy(true); };
       u.onend = () => {
-        setIsSpeaking(false);
-        setNarratorBusy(false);
-        if (speechTimerRef.current) {
-          clearTimeout(speechTimerRef.current);
-          speechTimerRef.current = null;
-        }
+        setIsSpeaking(false); setNarratorBusy(false);
+        if (speechTimerRef.current) { clearTimeout(speechTimerRef.current); speechTimerRef.current = null; }
         if (onEnd) onEnd();
       };
       u.onerror = () => {
-        setIsSpeaking(false);
-        setNarratorBusy(false);
-        if (speechTimerRef.current) {
-          clearTimeout(speechTimerRef.current);
-          speechTimerRef.current = null;
-        }
+        setIsSpeaking(false); setNarratorBusy(false);
+        if (speechTimerRef.current) { clearTimeout(speechTimerRef.current); speechTimerRef.current = null; }
         if (onEnd) onEnd();
       };
       speechRef.current = u;
@@ -332,10 +305,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   );
 
   const speakNarrator = useCallback(
-    (text: string) => {
-      setNarratorBusy(true);
-      speakNow(text, "es-MX", 0.95);
-    },
+    (text: string) => { setNarratorBusy(true); speakNow(text, "es-MX", 0.95); },
     [speakNow]
   );
 
@@ -348,9 +318,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       u.rate = 10;
       window.speechSynthesis.speak(u);
       audioUnlockedRef.current = true;
-    } catch (err) {
-      console.warn('[TTS] Error al desbloquear audio:', err);
-    }
+    } catch (err) { console.warn('[TTS] Error al desbloquear audio:', err); }
   }, []);
 
   const speakFriend = useCallback(
@@ -391,18 +359,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, []);
 
   const toggleListening = () => {
-    if ("speechSynthesis" in window) { window.speechSynthesis.cancel(); }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     setIsSpeaking(false);
     const rec = ensureRecognition();
-    if (!rec) {
-      alert("Tu navegador no soporta reconocimiento de voz. Puedes escribir tus mensajes.");
-      return;
-    }
-    if (listening) {
-      try { rec.stop(); } catch (e) {}
-      setListening(false);
-      return;
-    }
+    if (!rec) { alert("Tu navegador no soporta reconocimiento de voz. Puedes escribir tus mensajes."); return; }
+    if (listening) { try { rec.stop(); } catch (e) {} setListening(false); return; }
     try {
       window.setTimeout(() => { try { rec.start(); } catch (err) { setListening(false); setLiveTranscript("⚠ No se pudo iniciar el microfono"); } }, 350);
       setListening(true);
@@ -432,7 +393,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       if (!trimmed) return;
       const current = messagesRef.current;
       const newMessages: FreeTalkTurn[] = opts?.asStart ? current : [...current, { role: "user", text: trimmed }];
-      if (!opts?.asStart) { setMessages(newMessages); }
+      if (!opts?.asStart) setMessages(newMessages);
       setInputText("");
       setReplyHints([]);
       setLiveTranscript("");
@@ -440,7 +401,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       try {
         const history = (opts?.asStart ? [] : current).map((m) => ({ role: m.role, text: m.text }));
         const resume = freeTalkStore.getSummary().es || undefined;
-        const data = await sendFreeTalkMessage(trimmed, history, { level, nickname, resume });
+        const data = await sendFreeTalkMessage(trimmed, history, { level, nickname, role, resume });
         const assistant: FreeTalkTurn = {
           role: "assistant",
           text: (data.reply || "").replace(/\bfriend\b/gi, (nickname || "friend").trim()),
@@ -456,7 +417,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         } else {
           setReplyHints(buildReplyHints(data.reply));
         }
-        if (!opts?.silent) { speakFriend(data.reply); }
+        if (!opts?.silent) speakFriend(data.reply);
       } catch (err: any) {
         const assistant: FreeTalkTurn = {
           role: "assistant",
@@ -471,12 +432,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         setIsProcessing(false);
       }
     },
-    [isProcessing, level, nickname, speakFriend]
+    [isProcessing, level, nickname, speakFriend, role]
   );
 
-  useEffect(() => {
-    sendMessageRef.current = sendMessage;
-  }, [sendMessage]);
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
   const startFirstMessage = useCallback(
     async () => {
@@ -487,9 +446,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       savedRef.current = false;
       setPhase("conversation");
       logActividadGlobalToLake(Identity.getEmail() || nickname, "conversation", "started", nickname);
-      await sendMessage(buildKickoff(nickname), { asStart: true, silent: true });
+      // Enviar un mensaje inicial para que el personaje se presente
+      const kickoff = buildKickoff(nickname);
+      await sendMessage(kickoff, { asStart: true, silent: true });
       const first = messagesRef.current[0];
-      if (first) { speakFriend(first.text); }
+      if (first) speakFriend(first.text);
     },
     [sendMessage, speakFriend, phase, narratorBusy, nickname]
   );
@@ -499,11 +460,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       if (obStep === 0) {
         speakNarrator("¡Hola! Bienvenido a tu espacio de conversación libre en inglés. Aquí practicarás speaking sin gramática, sin reglas y sin calificaciones: solo conversación con un amigo que se adapta a ti. Primero, dime: ¿cómo te llamas?");
       } else if (obStep === 1) {
-        speakNarrator("¡Perfecto, " + (nickname || "amigo") + "! Tienes tres controles. Primero: el regulador de palabras. Segundo: el velocímetro de la voz. Y tercero: el botón de pánico: si no entiendes algo, tócalo y verás la traducción al español. Tú controlas todo.");
+        speakNarrator("¡Perfecto, " + (nickname || "amigo") + "! Tienes tres controles. Primero: el regulador de palabras. Segundo: el velocímetro de la voz. Y tercero: el botón de pánico. Tú controlas todo.");
       } else if (obStep === 2) {
         speakNarrator("Probemos tu micrófono. Toca el botón y di una palabra en voz alta.");
       } else if (obStep === 3) {
-        speakNarrator("Ajusta los controles a tu gusto: qué tan cortas quieres mis respuestas, y a qué velocidad quieres escucharme. Puedes cambiarlos cuando quieras.");
+        speakNarrator("Ajusta los controles a tu gusto: qué tan cortas quieres mis respuestas, a qué velocidad quieres escucharme, y con quién quieres conversar hoy. Puedes cambiarlos cuando quieras.");
       } else if (obStep === 4) {
         playTransition();
         speakNarrator("¡Todo listo! Para activar el modo conversación, di la frase de inicio en inglés. Después de eso, todo será en inglés.");
@@ -521,7 +482,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         speakNarrator("¡Hola " + name + "! Qué gusto verte de nuevo. Recordando nuestra última plática: " + cleanTTS(resumeText) + " ¿Quieres seguir practicando? Cuando estés listo, di la frase de inicio para activar la conversación en inglés.");
       }, 700);
     }
-  }, [phase, obStep, speakNarrator]);
+  }, [phase, obStep, speakNarrator, nickname]);
 
   useEffect(() => { return () => stopSpeaking(); }, [stopSpeaking]);
 
@@ -551,14 +512,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       setSummary(s);
       savedRef.current = true;
       return true;
-    } catch (e) {
-      console.warn("[Save] Error:", e);
-      return false;
-    }
+    } catch (e) { console.warn("[Save] Error:", e); return false; }
   }, [nickname, cloudUsers]);
 
   const resetInactivityTimer = useCallback(() => {
-    if (inactivityTimerRef.current) { clearTimeout(inactivityTimerRef.current); }
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     if (phase !== "conversation") return;
     inactivityTimerRef.current = setTimeout(async () => {
       const history = messagesRef.current;
@@ -569,8 +527,8 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [phase, saveWithBeacon]);
 
   useEffect(() => {
-    if (phase === "conversation") { resetInactivityTimer(); }
-    return () => { if (inactivityTimerRef.current) { clearTimeout(inactivityTimerRef.current); } };
+    if (phase === "conversation") resetInactivityTimer();
+    return () => { if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current); };
   }, [messages, phase, resetInactivityTimer]);
 
   useEffect(() => {
@@ -597,11 +555,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       if (savedCode && validateCode(savedCode)) {
         setPendingExitAction(() => action);
         setSavingBeforeExit(true);
-        saveWithBeacon().then(() => {
-          setSavingBeforeExit(false);
-          setPendingExitAction(null);
-          action();
-        });
+        saveWithBeacon().then(() => { setSavingBeforeExit(false); setPendingExitAction(null); action(); });
         return;
       }
       setPendingExitAction(() => action);
@@ -614,10 +568,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   }, [phase, validateCode, saveWithBeacon]);
 
   const handleConfirmExit = useCallback(async () => {
-    if (!validateCode(accessCode)) {
-      setCodeError("Código inválido. Verifica con tu Director.");
-      return;
-    }
+    if (!validateCode(accessCode)) { setCodeError("Código inválido. Verifica con tu Director."); return; }
     localStorage.setItem(ACCESS_CODE_LS_KEY, accessCode.trim().toUpperCase());
     setSavingBeforeExit(true);
     await saveWithBeacon();
@@ -686,6 +637,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     setSummary({ en: "", es: "" });
     setLevel("1");
     setSpeed("0.7");
+    setRole("friend");
     setMicStatus("idle");
     setPanicOn(false);
     setListening(false);
@@ -709,9 +661,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   };
 
   const logActividadGlobalToLake = (email: string, herramienta: string, accion: string, detalle?: string) => {
-    if (email) {
-      Identity.logActividadGlobal(email, herramienta, accion, detalle).catch(() => {});
-    }
+    if (email) Identity.logActividadGlobal(email, herramienta, accion, detalle).catch(() => {});
   };
 
   const isProtocolBlocked = (phase === "onboarding" || phase === "resume") && narratorBusy;
@@ -733,53 +683,44 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     </div>
   );
 
-  // Lógica de "Continuar" del onboarding (obStep === 3)
   const handleOnboardingContinue = () => {
     if (skipSessionInfo) {
-      // Ya no mostrar modal 2, ir directo al kickoff
       freeTalkStore.setLevel(level);
       freeTalkStore.setSpeed(speed);
+      freeTalkStore.setRole(role);
       freeTalkStore.markReady();
       setObStep(4);
     } else {
-      // Mostrar modal 2
       setDontShowAgain(false);
       setShowSessionInfoModal(true);
     }
   };
 
-  // Lógica de "Continuar" del modal 2 (con disparo de TTS 1 + TTS 2)
   const handleSessionInfoContinue = () => {
     if (dontShowAgain) {
       localStorage.setItem(SKIP_SESSION_INFO_KEY, "true");
       setSkipSessionInfo(true);
     }
-    // Guardar nivel/velocidad y avanzar
     freeTalkStore.setLevel(level);
     freeTalkStore.setSpeed(speed);
+    freeTalkStore.setRole(role);
     freeTalkStore.markReady();
     setShowSessionInfoModal(false);
     playTransition();
-
-    // Desbloquear TTS
     unlockAudio();
 
-    // TTS 1 → TTS 2 encadenados
     const nameForTTS = (nickname || "friend").trim();
-    const tts1 = `Perfect, ${nameForTTS}! You are all set. Remember to save your session when you finish, so I can remember everything we talk about.`;
+    const personaName = roleData.personaName;
+    const tts1 = `Hi! I'm ${personaName}. Nice to meet you, ${nameForTTS}!`;
     const tts2 = `So, ${nameForTTS}, what do you want to talk about today?`;
 
-    // Cambiar a fase conversación (sin kickoff previo, los TTS ya dan el pie)
     setMessages([]);
     historyReadyRef.current = false;
     setPhase("conversation");
 
-    // TTS 1 → al terminar, TTS 2
     setTimeout(() => {
       speakFriend(tts1, () => {
-        setTimeout(() => {
-          speakFriend(tts2);
-        }, 250);
+        setTimeout(() => { speakFriend(tts2); }, 250);
       });
     }, 600);
   };
@@ -791,50 +732,25 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         <div className="flex flex-col gap-4 max-w-md w-full">
           <h2 className="text-2xl font-geist font-bold text-white">Bienvenido a tu espacio de conversación</h2>
           <p className="text-sm text-[#849495] leading-relaxed">
-            Practica <b className="text-white">speaking libre</b> en inglés: sin gramática, sin reglas, sin calificaciones. Un amigo virtual que se adapta a tu nivel y se interesa por lo que te importa.
+            Practica <b className="text-white">speaking libre</b> en inglés: sin gramática, sin reglas, sin calificaciones.
           </p>
           {cloudUsers.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {cloudUsers.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => {
-                    localStorage.setItem("ft_cloud_user", u.id);
-                    freeTalkStore.setNickname(u.nickname);
-                    setNickname(u.nickname);
-                    setObStep(1);
-                  }}
-                  disabled={isProtocolBlocked}
-                  className="ft-pill"
-                >
+                <button key={u.id} onClick={() => { localStorage.setItem("ft_cloud_user", u.id); freeTalkStore.setNickname(u.nickname); setNickname(u.nickname); setObStep(1); }} disabled={isProtocolBlocked} className="ft-pill">
                   👤 {u.nickname}
                 </button>
               ))}
             </div>
           )}
-          {cloudUsers.length > 0 && (
-            <p className="text-xs text-[#849495]">Toca tu perfil de la base de datos AURIX, o escribe otro nombre abajo.</p>
-          )}
           <label className="text-xs text-[#849495] uppercase tracking-widest">¿Cómo te llamas?</label>
-          <input
-            type="text"
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            placeholder="Tu nombre / nickname"
-            className="ft-input"
-          />
-          <button
-            onClick={() => {
-              const name = nickname.trim();
-              if (!name) { speakNarrator("Dime tu nombre para continuar, por favor."); return; }
-              freeTalkStore.setNickname(name);
-              setObStep(1);
-            }}
-            disabled={isProtocolBlocked}
-            className="ft-btn-primary"
-          >
-            Continuar
-          </button>
+          <input type="text" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="Tu nombre / nickname" className="ft-input" />
+          <button onClick={() => {
+            const name = nickname.trim();
+            if (!name) { speakNarrator("Dime tu nombre para continuar, por favor."); return; }
+            freeTalkStore.setNickname(name);
+            setObStep(1);
+          }} disabled={isProtocolBlocked} className="ft-btn-primary">Continuar</button>
         </div>
       );
     }
@@ -844,7 +760,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           <h2 className="text-xl font-geist font-bold text-white">Tus tres controles</h2>
           <div className="ft-card">
             <p className="text-sm text-white font-semibold">🎚 Regulador de palabras</p>
-            <p className="text-xs text-[#849495]">Mis respuestas serán cortas, medianas, largas o nativas sin filtro. Tú eliges.</p>
+            <p className="text-xs text-[#849495]">Mis respuestas serán cortas, medianas, largas o nativas sin filtro.</p>
           </div>
           <div className="ft-card">
             <p className="text-sm text-white font-semibold">🎛 Velocímetro de la voz</p>
@@ -852,7 +768,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           </div>
           <div className="ft-card">
             <p className="text-sm text-white font-semibold">🚨 Botón de pánico</p>
-            <p className="text-xs text-[#849495]">Si no entiendes algo, tócalo y verás al instante la traducción al español.</p>
+            <p className="text-xs text-[#849495]">Si no entiendes algo, tócalo y verás la traducción al español.</p>
           </div>
           <button onClick={() => setObStep(2)} disabled={isProtocolBlocked} className="ft-btn-primary">Continuar</button>
         </div>
@@ -900,6 +816,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       content = (
         <div className="flex flex-col gap-4 max-w-md w-full">
           <h2 className="text-xl font-geist font-bold text-white">Ajusta tus controles</h2>
+
           <div>
             <p className="text-xs text-[#849495] uppercase tracking-widest mb-2">Longitud de mis respuestas</p>
             <div className="flex flex-wrap gap-2">
@@ -911,6 +828,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
               ))}
             </div>
           </div>
+
           <div>
             <p className="text-xs text-[#849495] uppercase tracking-widest mb-2">Velocidad de la voz</p>
             <div className="flex flex-wrap gap-2">
@@ -921,6 +839,31 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
               ))}
             </div>
           </div>
+
+          <div>
+            <p className="text-xs text-[#849495] uppercase tracking-widest mb-2">🎭 Modo de conversación</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.keys(ROLE_LABELS) as FreeTalkRole[]).map((r) => {
+                const info = ROLE_LABELS[r];
+                const isActive = role === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => setRole(r)}
+                    className={`ft-pill flex flex-col items-start gap-1 !py-3 text-left transition-all ${isActive ? "ft-pill-active" : ""}`}
+                    style={isActive ? { borderColor: info.color, boxShadow: `0 0 15px ${info.color}40` } : undefined}
+                  >
+                    <span className="flex items-center gap-2 text-[11px] font-bold">
+                      <span className="text-base">{info.emoji}</span>
+                      {info.label}
+                    </span>
+                    <span className="text-[9px] opacity-60 leading-tight">{info.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <button onClick={handleOnboardingContinue} disabled={isProtocolBlocked} className="ft-btn-primary">Continuar</button>
         </div>
       );
@@ -946,9 +889,10 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
             else if (obStep === 4) sayKickoff();
           }}
           title="Toca para hablar"
+          color={activeColor}
         />
         {listening && (
-          <p className="text-xs text-[#00f0ff] font-code animate-pulse text-center px-4">
+          <p className="text-xs font-code animate-pulse text-center px-4" style={{ color: activeColor }}>
             🎤 {liveTranscript || "Escuchando... di la frase de inicio"}
           </p>
         )}
@@ -1022,16 +966,22 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   );
 
   const renderConversation = () => (
-    <div className="flex flex-col h-full w-full max-w-3xl mx-auto gap-3">
+    <div
+      className="flex flex-col h-full w-full max-w-3xl mx-auto gap-3 rounded-3xl p-4 transition-colors duration-500"
+      style={{
+        backgroundColor: `${activeColor}0a`,
+        boxShadow: `0 0 60px ${activeColor}20 inset`,
+      }}
+    >
       {showControls && (
         <div className="ft-card !py-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] text-[#849495] font-code uppercase tracking-widest">CONTROLES</span>
-            <button onClick={() => setShowControls(false)} className="ft-pill !px-2 !py-1 text-[10px]" title="Ocultar controles">✕ Cerrar</button>
+            <button onClick={() => setShowControls(false)} className="ft-pill !px-2 !py-1 text-[10px]">✕ Cerrar</button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {(Object.keys(LEVEL_LABELS) as FreeTalkLevel[]).map((l) => (
-              <button key={l} onClick={() => { setLevel(l); freeTalkStore.setLevel(l); }} className={`ft-pill !px-2 !py-1 text-[10px] ${level === l ? "ft-pill-active" : ""}`} title={LEVEL_LABELS[l].range}>
+              <button key={l} onClick={() => { setLevel(l); freeTalkStore.setLevel(l); }} className={`ft-pill !px-2 !py-1 text-[10px] ${level === l ? "ft-pill-active" : ""}`}>
                 {LEVEL_LABELS[l].label}
               </button>
             ))}
@@ -1044,22 +994,25 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            <button onClick={() => setPanicOn(!panicOn)} className={`ft-pill !px-3 !py-1.5 text-[11px] ${panicOn ? "ft-pill-danger-on" : "ft-pill-danger"}`} title="Mostrar traducción al español">
+            <button onClick={() => setPanicOn(!panicOn)} className={`ft-pill !px-3 !py-1.5 text-[11px] ${panicOn ? "ft-pill-danger-on" : "ft-pill-danger"}`}>
               🚨 {panicOn ? "Traducción visible" : "Pánico"}
             </button>
-            <button onClick={() => attemptExit(() => { setDrawerOpen(false); finishSession(); })} disabled={finishing} className="ft-pill !px-3 !py-1.5 text-[11px]" title="Terminar conversación">
+            <button onClick={() => attemptExit(() => { setDrawerOpen(false); finishSession(); })} disabled={finishing} className="ft-pill !px-3 !py-1.5 text-[11px]">
               {finishing ? "Guardando..." : "⏹ Terminar"}
             </button>
           </div>
         </div>
       )}
+
       <div className="flex justify-center py-1">
         <MicOrb
           state={listening ? "listening" : isProcessing ? "processing" : isSpeaking ? "speaking" : "idle"}
           onClick={toggleListening}
           title={listening ? "Detener micrófono" : "Toca para hablar"}
+          color={activeColor}
         />
       </div>
+
       <div className="flex-1 overflow-y-auto ft-scroll px-1 space-y-3">
         {messages.length === 0 && !isProcessing && (
           <div className="text-center py-6">
@@ -1069,8 +1022,8 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         {messages.map((m, i) => (
           <div key={i} className={`ft-bubble ${m.role === "user" ? "ft-bubble-user" : "ft-bubble-ai"}`}>
             <div className="flex items-center justify-between gap-2 mb-1">
-              <span className={`text-[10px] font-code uppercase tracking-widest ${m.role === "user" ? "text-[#c1c7cf]" : "text-[#00f0ff]"}`}>
-                {m.role === "user" ? (nickname || "Tú") : "Tu amigo"}
+              <span className={`text-[10px] font-code uppercase tracking-widest flex items-center gap-1.5`} style={{ color: m.role === "user" ? "#c1c7cf" : activeColor }}>
+                {m.role === "user" ? (nickname || "Tú") : `${roleData.emoji} ${activePersonaName}`}
               </span>
               <span className="text-[10px] text-[#849495]">{i + 1}</span>
             </div>
@@ -1082,12 +1035,12 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         ))}
         {isProcessing && (
           <div className="ft-bubble ft-bubble-ai">
-            <p className="text-xs text-[#00f0ff] font-code animate-pulse">typing...</p>
+            <p className="text-xs font-code animate-pulse" style={{ color: activeColor }}>typing...</p>
           </div>
         )}
         {listening && (
           <div className="ft-bubble ft-bubble-user border-[#00f0ff]/60">
-            <p className="text-xs text-[#00f0ff] font-code animate-pulse">🎤 {liveTranscript || "Escuchando..."}</p>
+            <p className="text-xs font-code animate-pulse" style={{ color: activeColor }}>🎤 {liveTranscript || "Escuchando..."}</p>
           </div>
         )}
         <div ref={listEndRef} />
@@ -1099,7 +1052,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
                 <button
                   onClick={() => { const next = !showHintTranslations; setShowHintTranslations(next); try { localStorage.setItem("ft_hint_translations", String(next)); } catch {} }}
                   className={`ft-pill !px-2 !py-1 text-[10px] ${showHintTranslations ? "ft-pill-active" : ""}`}
-                  title={showHintTranslations ? "Ocultar traducción" : "Ver traducción"}
                 >
                   🇪🇸 {showHintTranslations ? "Ocultar traducción" : "Ver traducción"}
                 </button>
@@ -1107,14 +1059,13 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
                   onClick={() => attemptExit(() => { setDrawerOpen(false); finishSession(); })}
                   disabled={finishing}
                   className="ft-pill !px-2 !py-1 text-[10px] !border-[#00ff88]/40 !text-[#9ff5c8]"
-                  title="Guardar y salir de la conversación"
                 >
                   {finishing ? "⏳ Guardando..." : "💾 Guardar y salir"}
                 </button>
               </div>
             </div>
             {replyHints.map((h, idx) => (
-              <button key={idx} onClick={() => speakFriend(h.en)} disabled={isSpeaking} className="ft-chip whitespace-normal !border-[#00ff88]/40 !text-[#9ff5c8] text-left" title="Escuchar pronunciación">
+              <button key={idx} onClick={() => speakFriend(h.en)} disabled={isSpeaking} className="ft-chip whitespace-normal !border-[#00ff88]/40 !text-[#9ff5c8] text-left">
                 <span className="block text-[11px]">🔊 {h.en}</span>
                 {showHintTranslations && h.es && (<span className="block text-[9px] opacity-70">🇪🇸 {h.es}</span>)}
               </button>
@@ -1122,13 +1073,15 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           </div>
         )}
       </div>
+
       <div className="flex gap-2 overflow-x-auto ft-scroll pb-1">
         {SUGGESTIONS.map((s) => (
-          <button key={s} onClick={() => speakFriend(s)} disabled={isSpeaking} className="ft-chip whitespace-nowrap" title="Escuchar sugerencia (no se envía)">
+          <button key={s} onClick={() => speakFriend(s)} disabled={isSpeaking} className="ft-chip whitespace-nowrap">
             🔊 {s}
           </button>
         ))}
       </div>
+
       <div className="flex items-center gap-2">
         <input
           type="text"
@@ -1149,21 +1102,16 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get("reset") === "1") {
-        freeTalkStore.reset();
-        window.history.replaceState({}, "", window.location.pathname);
-      }
+      if (params.get("reset") === "1") { freeTalkStore.reset(); window.history.replaceState({}, "", window.location.pathname); }
     } catch {}
-    if (freeTalkStore.getVersion() !== STORAGE_VERSION) {
-      freeTalkStore.reset();
-      freeTalkStore.setVersion(STORAGE_VERSION);
-    }
+    if (freeTalkStore.getVersion() !== STORAGE_VERSION) { freeTalkStore.reset(); freeTalkStore.setVersion(STORAGE_VERSION); }
     const savedName = freeTalkStore.getNickname() || "";
     const savedHistory = freeTalkStore.loadHistory();
     const savedSummary = freeTalkStore.getSummary();
     setNickname(savedName);
     setLevel(freeTalkStore.getLevel());
     setSpeed(freeTalkStore.getSpeed());
+    setRole(freeTalkStore.getRole());
     const returning = savedHistory.length > 0 || Boolean(savedSummary?.es || savedSummary?.en);
     if (returning && savedName) {
       setMessages(savedHistory);
@@ -1217,19 +1165,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [topVisible, setTopVisible] = useState(true);
   useEffect(() => {
     let t: any = null;
-    const show = () => {
-      setTopVisible(true);
-      if (t) clearTimeout(t);
-      t = setTimeout(() => setTopVisible(false), 3500);
-    };
+    const show = () => { setTopVisible(true); if (t) clearTimeout(t); t = setTimeout(() => setTopVisible(false), 3500); };
     show();
     window.addEventListener("pointermove", show);
     window.addEventListener("touchstart", show);
-    return () => {
-      if (t) clearTimeout(t);
-      window.removeEventListener("pointermove", show);
-      window.removeEventListener("touchstart", show);
-    };
+    return () => { if (t) clearTimeout(t); window.removeEventListener("pointermove", show); window.removeEventListener("touchstart", show); };
   }, []);
 
   const [endVisible, setEndVisible] = useState(true);
@@ -1240,13 +1180,8 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     endTimerRef.current = setTimeout(() => setEndVisible(false), 6000);
   }, []);
 
-  useEffect(() => {
-    if (phase === "conversation") showEndBtn();
-  }, [phase, showEndBtn]);
-
-  useEffect(() => {
-    return () => { if (endTimerRef.current) clearTimeout(endTimerRef.current); };
-  }, []);
+  useEffect(() => { if (phase === "conversation") showEndBtn(); }, [phase, showEndBtn]);
+  useEffect(() => { return () => { if (endTimerRef.current) clearTimeout(endTimerRef.current); }; }, []);
 
   const headerLabel =
     phase === "conversation" ? "CONVERSACIÓN LIBRE · INGLÉS"
@@ -1256,34 +1191,22 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-[#0a0c12] text-white overflow-hidden">
-      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-[#00f0ff]/10 blur-[120px]" />
+      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-[#00f0ff]/10 blur-[120px] transition-colors duration-500" style={{ backgroundColor: `${activeColor}1a` }} />
 
-      {/* Modal 1: Instrucciones iniciales */}
       {showWelcomeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/85 backdrop-blur-md" />
           <div className="relative z-10 w-full max-w-md bg-[#0e0e0e] border border-[#00f0ff]/30 rounded-3xl p-8 shadow-2xl">
             <div className="flex flex-col items-center gap-4 mb-6">
               <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-[#00f2fe] via-[#4facfe] to-[#7f00ff] p-[2px] shadow-[0_0_30px_rgba(0,242,254,0.4)]">
-                <div className="w-full h-full rounded-full bg-[#0a0c12] flex items-center justify-center">
-                  <span className="text-2xl">🎧</span>
-                </div>
+                <div className="w-full h-full rounded-full bg-[#0a0c12] flex items-center justify-center"><span className="text-2xl">🎧</span></div>
               </div>
               <h2 className="text-xl font-geist font-bold text-white text-center">Antes de comenzar</h2>
             </div>
             <div className="space-y-3 mb-6">
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">Asegúrate de tener el <b className="text-white">volumen alto</b> y audífonos conectados</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">Te pediremos permiso para usar el <b className="text-white">micrófono</b></p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">Conversarás en inglés con <b className="text-white">AURIX</b>, tu amigo virtual</p>
-              </div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">Asegúrate de tener el <b className="text-white">volumen alto</b> y audífonos conectados</p></div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">Te pediremos permiso para usar el <b className="text-white">micrófono</b></p></div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">Conversarás en inglés con <b className="text-white">AURIX</b>, tu amiga virtual</p></div>
             </div>
             <button
               onClick={() => {
@@ -1297,73 +1220,55 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
                 }, 300);
               }}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#00f2fe] to-[#7f00ff] text-white font-bold text-sm tracking-wide shadow-[0_10px_30px_rgba(0,242,254,0.3)] hover:scale-[1.02] transition-transform"
-            >
-              Comenzar
-            </button>
+            >Comenzar</button>
           </div>
         </div>
       )}
 
-      {/* Modal 2: Instrucciones de la sesión (con checkbox) */}
       {showSessionInfoModal && (
         <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/85 backdrop-blur-md" />
           <div className="relative z-10 w-full max-w-md bg-[#0e0e0e] border border-[#00ff88]/40 rounded-3xl p-8 shadow-2xl">
             <div className="flex flex-col items-center gap-4 mb-6">
-              <div className="w-16 h-16 rounded-full bg-[#00ff88]/15 border border-[#00ff88]/30 flex items-center justify-center text-[#00ff88]">
-                <span className="text-3xl">📋</span>
-              </div>
+              <div className="w-16 h-16 rounded-full bg-[#00ff88]/15 border border-[#00ff88]/30 flex items-center justify-center text-[#00ff88]"><span className="text-3xl">📋</span></div>
               <h2 className="text-xl font-geist font-bold text-white text-center">Cómo funciona tu sesión</h2>
             </div>
             <div className="space-y-3 mb-6">
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">Conversa libremente con <b className="text-white">AURIX</b> en inglés</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">Al terminar, presiona <b className="text-white">"💾 Guardar y salir"</b></p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">Ingresa tu <b className="text-white">código de acceso</b> para guardar la sesión</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span>
-                <p className="text-sm text-[#c1c7cf] leading-relaxed">La próxima vez escucharás un <b className="text-white">resumen</b> de lo que platicaron</p>
-              </div>
-              <div className="flex items-start gap-3 pt-2 border-t border-white/5">
-                <span className="text-[#ffb84d] text-lg shrink-0 mt-0.5">🇪🇸</span>
-                <p className="text-xs text-[#849495] leading-relaxed">Si no entiendes algo en inglés, usa el <b className="text-white">botón de pánico (🚨)</b></p>
-              </div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">Conversa libremente con <b className="text-white">AURIX</b> en inglés</p></div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">Al terminar, presiona <b className="text-white">"💾 Guardar y salir"</b></p></div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">Ingresa tu <b className="text-white">código de acceso</b> para guardar la sesión</p></div>
+              <div className="flex items-start gap-3"><span className="text-[#00ff88] text-lg shrink-0 mt-0.5">✓</span><p className="text-sm text-[#c1c7cf] leading-relaxed">La próxima vez escucharás un <b className="text-white">resumen</b> de lo que platicaron</p></div>
+              <div className="flex items-start gap-3 pt-2 border-t border-white/5"><span className="text-[#ffb84d] text-lg shrink-0 mt-0.5">🇪🇸</span><p className="text-xs text-[#849495] leading-relaxed">Si no entiendes algo en inglés, usa el <b className="text-white">botón de pánico (🚨)</b></p></div>
             </div>
             <label className="flex items-center gap-3 mb-5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={dontShowAgain}
-                onChange={(e) => setDontShowAgain(e.target.checked)}
-                className="w-4 h-4 accent-[#00ff88] cursor-pointer"
-              />
+              <input type="checkbox" checked={dontShowAgain} onChange={(e) => setDontShowAgain(e.target.checked)} className="w-4 h-4 accent-[#00ff88] cursor-pointer" />
               <span className="text-xs text-[#c1c7cf]">No volver a mostrar estas instrucciones</span>
             </label>
-            <button
-              onClick={handleSessionInfoContinue}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#00ff88] to-[#00f2fe] text-[#061a1a] font-bold text-sm tracking-wide shadow-[0_10px_30px_rgba(0,255,136,0.3)] hover:scale-[1.02] transition-transform"
-            >
-              Continuar
-            </button>
+            <button onClick={handleSessionInfoContinue} className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#00ff88] to-[#00f2fe] text-[#061a1a] font-bold text-sm tracking-wide shadow-[0_10px_30px_rgba(0,255,136,0.3)] hover:scale-[1.02] transition-transform">Continuar</button>
           </div>
         </div>
       )}
 
       <div className="relative z-10 flex items-center justify-between px-3 py-2 pointer-events-none">
         <div className={`flex items-center gap-2 transition-opacity duration-700 ${topVisible ? "opacity-70" : "opacity-0"}`}>
-          <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse" />
-          <h1 className="font-geist font-bold text-[10px] md:text-xs tracking-widest uppercase">{headerLabel}</h1>
+          {phase === "conversation" ? (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-colors duration-500"
+              style={{ borderColor: `${activeColor}66`, backgroundColor: `${activeColor}15` }}
+            >
+              <span className="text-xs">{roleData.emoji}</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: activeColor }}>{activePersonaName}</span>
+            </div>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse" />
+              <h1 className="font-geist font-bold text-[10px] md:text-xs tracking-widest uppercase">{headerLabel}</h1>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {phase === "conversation" && endVisible && (
-            <button onClick={() => { setDrawerOpen(false); attemptExit(() => finishSession()); }} disabled={finishing} className="ft-pill !px-2.5 !py-1.5 text-[11px] pointer-events-auto" title="Terminar conversación">
+            <button onClick={() => { setDrawerOpen(false); attemptExit(() => finishSession()); }} disabled={finishing} className="ft-pill !px-2.5 !py-1.5 text-[11px] pointer-events-auto">
               {finishing ? "⏳ Guardando..." : "⏹ Terminar"}
             </button>
           )}
@@ -1372,7 +1277,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       </div>
 
       {phase === "conversation" && !endVisible && !finishing && (
-        <button onClick={showEndBtn} className="fixed top-2 right-16 z-30 ft-pill !px-2 !py-1.5 text-[11px] opacity-50 hover:opacity-100 transition-opacity" title="Mostrar botón de terminar conversación">⏹</button>
+        <button onClick={showEndBtn} className="fixed top-2 right-16 z-30 ft-pill !px-2 !py-1.5 text-[11px] opacity-50 hover:opacity-100 transition-opacity">⏹</button>
       )}
 
       {drawerOpen && (
@@ -1380,17 +1285,24 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <aside className="absolute right-0 top-0 h-full w-64 bg-[#0a0c12]/95 border-l border-[#00f0ff]/20 p-4 flex flex-col gap-2 overflow-y-auto ft-scroll" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
-              <span className="font-geist font-bold text-xs tracking-widest uppercase text-[#00f0ff]">{headerLabel}</span>
-              <button onClick={() => setDrawerOpen(false)} className="ft-pill !px-2 !py-1 text-[10px]" title="Cerrar">✕</button>
+              <span className="font-geist font-bold text-xs tracking-widest uppercase" style={{ color: activeColor }}>{headerLabel}</span>
+              <button onClick={() => setDrawerOpen(false)} className="ft-pill !px-2 !py-1 text-[10px]">✕</button>
             </div>
             {nickname && (
               <div className="ft-card !py-2 text-center">
                 <span className="text-[11px] text-[#00ff88] font-semibold">👤 {nickname}</span>
               </div>
             )}
+            {phase === "conversation" && (
+              <div className="ft-card !py-2 text-center" style={{ borderColor: `${activeColor}40` }}>
+                <span className="text-[11px] font-semibold flex items-center justify-center gap-2" style={{ color: activeColor }}>
+                  {roleData.emoji} {activePersonaName}
+                </span>
+              </div>
+            )}
             <button onClick={() => { stopSpeaking(); setDrawerOpen(false); }} className="ft-pill !py-2 text-[11px]">🔇 Silenciar voz</button>
             {phase === "conversation" && (
-              <button onClick={() => { setShowControls((v) => !v); setDrawerOpen(false); }} className="ft-pill !py-2 text-[11px]">⚙ Controles (nivel · velocidad · pánico · terminar)</button>
+              <button onClick={() => { setShowControls((v) => !v); setDrawerOpen(false); }} className="ft-pill !py-2 text-[11px]">⚙ Controles</button>
             )}
             <button onClick={() => setPanicOn((v) => !v)} className={`ft-pill !py-2 text-[11px] ${panicOn ? "ft-pill-danger-on" : "ft-pill-danger"}`}>🚨 {panicOn ? "Ocultar traducción" : "Traducción (pánico)"}</button>
             {phase === "conversation" && (
@@ -1398,12 +1310,11 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
             )}
             <button onClick={() => { setDrawerOpen(false); handleResetApp(); }} className="ft-pill !py-2 text-[11px] hover:border-red-500/60 hover:text-red-300">🗑 Reiniciar protocolo</button>
             <button onClick={() => { stopSpeaking(); setDrawerOpen(false); attemptExit(() => { window.location.href = MAIN_APP_URL; }); }} className="ft-pill !py-2 text-[11px] hover:border-[#00f0ff]/60 hover:text-[#7df4ff]">🏠 Volver a la app principal</button>
-            {onExit && (
-              <button onClick={() => attemptExit(onExit)} className="ft-pill !py-2 text-[11px]">🚪 Salir</button>
-            )}
+            {onExit && (<button onClick={() => attemptExit(onExit)} className="ft-pill !py-2 text-[11px]">🚪 Salir</button>)}
           </aside>
         </div>
       )}
+
       <main className="relative z-10 flex-1 overflow-y-auto ft-scroll px-4 py-5 flex items-start justify-center">
         {phase === "onboarding" && renderOnboarding()}
         {phase === "resume" && renderResume()}
@@ -1414,7 +1325,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
         {phase === "off" && renderOff()}
       </main>
 
-      {/* Modal 3: Código de acceso */}
       {showCodeModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={handleCancelExit} />
