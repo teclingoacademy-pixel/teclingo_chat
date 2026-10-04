@@ -90,6 +90,66 @@ function truncateToMax(text: string, max: number): string {
   return out;
 }
 
+// --- ROLES (JUEGO DE ROLES) ---
+
+type FreeTalkRole = "friend" | "stranger" | "cafe" | "coworker" | "classmate" | "party";
+
+const ROLE_INSTRUCTIONS: Record<FreeTalkRole, string> = {
+  friend: "", // Rol default, sin instrucciones extra
+
+  stranger: `
+[ROLE: MEETING A STRANGER WHILE TRAVELING]
+You are a friendly stranger the student just met while traveling (in a hostel, on a train, at a tourist spot).
+- You are from an English-speaking country and you are curious about the student.
+- Start with simple, warm small talk: where they are from, what they do, why they are traveling.
+- Share small details about yourself (where you are from, what you like about traveling).
+- React naturally to what the student says (surprise, interest, agreement).
+- Use casual, everyday English. Avoid formal or academic language.
+- NEVER break character. You are this stranger, not a teacher.
+`,
+
+  cafe: `
+[ROLE: ORDERING AT A CAFE]
+You are a friendly waiter/waitress at a cafe in an English-speaking city.
+- Greet the student warmly, hand them a menu, and ask what they would like to order.
+- Help them choose (ask about preferences, allergies, sizes).
+- Repeat their order back to confirm.
+- Add small talk if natural ("How is your day going?", "First time here?").
+- Use real cafe vocabulary: "For here or to go?", "Would you like anything else?", "That will be $X".
+- NEVER break character. You are the waiter, not a teacher.
+`,
+
+  coworker: `
+[ROLE: SMALL TALK WITH A COWORKER]
+You are a friendly coworker at a company in an English-speaking country.
+- You just ran into the student in the break room or by the elevator.
+- Make natural office small talk: weekends, weather, sports, weekend plans, projects.
+- Share a small bit about your own weekend or work.
+- Keep it light and casual, like real coworkers do.
+- NEVER break character. You are the coworker, not a teacher.
+`,
+
+  classmate: `
+[ROLE: MEETING A CLASSMATE AT SCHOOL/UNIVERSITY]
+You are a friendly classmate the student just met at school or university in an English-speaking country.
+- You both just arrived at the same class or you are in the hallway.
+- Ask about their major, where they are from, what they think of the class.
+- Share a bit about yourself (your major, your hobbies, your favorite subjects).
+- Keep it casual and young, like real students talk.
+- NEVER break character. You are the classmate, not a teacher.
+`,
+
+  party: `
+[ROLE: MEETING SOMEONE AT A PARTY]
+You are a friendly person the student just met at a party or social event.
+- You are both guests, and the host introduced you.
+- Ask how they know the host, what they do for fun, what music/food they like.
+- Share something about yourself naturally.
+- Keep it light, casual, with a bit of humor if the student is receptive.
+- NEVER break character. You are this person at the party, not a teacher.
+`,
+};
+
 // --- OpenAI-compatible endpoints (Ollama primary + Groq + OmniRoute + Gemini fallbacks) ---
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com/ollama").replace(/\/+$/, "");
@@ -149,11 +209,19 @@ async function callOllama(opts: {
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       stream: false,
+      keep_alive: "24h",
       messages: [
         { role: "system", content: opts.system },
         { role: "user", content: opts.user },
       ],
-      options: { temperature: opts.temperature ?? 0.7 },
+      options: {
+        temperature: opts.temperature ?? 0.7,
+        num_predict: 120,
+        num_ctx: 1024,
+        top_k: 40,
+        top_p: 0.9,
+        repeat_penalty: 1.1,
+      },
     }),
   });
   if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
@@ -235,9 +303,12 @@ const buildFreeTalkInstructions = (opts: {
   resume: string | null;
   min: number | null;
   max: number | null;
+  role?: FreeTalkRole;
 }) => {
   const name = opts.nickname || "friend";
   const isNative = opts.level === "native" || !opts.min || !opts.max;
+  const role = opts.role || "friend";
+  const roleInstructions = ROLE_INSTRUCTIONS[role] || "";
 
   const wordRule = isNative
     ? `- NO word limit: reply naturally, like a normal native speaker, at a relaxed pace.`
@@ -285,6 +356,7 @@ In addition to "english" and "spanish", you MUST return a "hints" array with EXA
 - NEVER repeat the same hint twice.
 - ALWAYS return exactly 4 hints.
 - The "hints" array MUST contain 4 OBJECTS, each with "en" and "es" keys.
+${roleInstructions}
 `;
 };
 
@@ -297,6 +369,7 @@ async function generateFriendReply(opts: {
   min: number | null;
   max: number | null;
   extraStrict: boolean;
+  role: FreeTalkRole;
 }) {
   const instruction = buildFreeTalkInstructions(opts);
   const strict =
@@ -502,6 +575,7 @@ app.post("/api/tutor/chat", async (req, res) => {
     const level = String(req.body.response_level || "1");
     const nickname = (req.body.nickname || currentProfile.nickname || "").trim();
     const resume = req.body.resume_summary || currentProfile.resume_summary || null;
+    const role = (req.body.role || "friend") as FreeTalkRole;
     const rule = LEVEL_RULES[level];
     const isNative = level === "native" || !rule;
     const min = isNative ? null : rule.min;
@@ -515,6 +589,7 @@ app.post("/api/tutor/chat", async (req, res) => {
         reply_hints: hints,
         word_count: countWords(english),
         level,
+        role,
         min,
         max,
         status: "success",
@@ -523,7 +598,6 @@ app.post("/api/tutor/chat", async (req, res) => {
       });
     };
 
-    // Generar respuesta
     let result = await generateFriendReply({
       history: history || [],
       user_input: inputPrompt,
@@ -533,6 +607,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       min,
       max,
       extraStrict: false,
+      role,
     });
 
     if (!result.english) {
@@ -569,10 +644,10 @@ app.post("/api/tutor/chat", async (req, res) => {
         min,
         max,
         extraStrict: true,
+        role,
       });
     }
 
-    // Si aún excede el máximo, truncar
     if (!isNative && countWords(result.english) > (rule?.max ?? Infinity)) {
       result.english = truncateToMax(result.english, rule?.max ?? Infinity);
     }
@@ -642,7 +717,6 @@ app.post("/api/tutor/summarize", async (req, res) => {
       console.warn("[Summarize] Ollama failed, switching to Groq:", err?.message || err);
     }
 
-    // 1) BACKUP: Groq
     if (process.env.GROQ_API_KEY) {
       try {
         const conversation = (history || [])
@@ -662,7 +736,6 @@ app.post("/api/tutor/summarize", async (req, res) => {
       }
     }
 
-    // 2) Backup: OmniRoute
     if (process.env.OMNIROUTE_API_KEY) {
       try {
         const conversation = (history || [])
@@ -681,7 +754,6 @@ app.post("/api/tutor/summarize", async (req, res) => {
       }
     }
 
-    // 3) Backup: Gemini
     if (process.env.GEMINI_API_KEY) {
       try {
         const ai = getAiClient();
@@ -839,5 +911,20 @@ app.post("/api/voice-command", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// --- PRECALENTAMIENTO DE OLLAMA (al final del archivo, con setTimeout seguro) ---
+setTimeout(async () => {
+  try {
+    console.log("[Ollama] Precalentando modelo (delay 5s)...");
+    await callOllama({
+      system: "You are a helpful assistant.",
+      user: "Hi",
+      temperature: 0.1,
+    });
+    console.log("[Ollama] Modelo listo en RAM");
+  } catch (e) {
+    console.warn("[Ollama] No se pudo precalentar:", e);
+  }
+}, 5000);
 
 export default app;
