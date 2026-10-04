@@ -10,6 +10,7 @@ export interface FreeTalkTurn {
 export interface ChatReply {
   reply: string;
   spanish?: string;
+  reply_hints?: string[];
   word_count: number;
   level: string;
   min: number | null;
@@ -163,4 +164,6 @@ export async function generateSessionSummary(
     summary_es: data.summary_es || "",
   };
 }
+
+
 

@@ -27,7 +27,6 @@ const getAiClient = () => {
 
 // --- NEXUS-7 FUTURISTIC TUTOR ENGINE & ADN PROFILE ADAPTER ---
 
-// In-memory active student profile store (Default loaded from OnboardingADN record)
 let activeStudentProfile = {
   email: "estudiante@teclingo.local",
   level: "Intermedio",
@@ -73,7 +72,6 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 
 // --- FREE CONVERSATION ENGINE (SPEAKING PRACTICE, NO GRAMMAR) ---
 
-// Regulador de palabras: niveles inviolables de longitud de respuesta
 const LEVEL_RULES: Record<string, { min: number; max: number }> = {
   "1": { min: 3, max: 5 },
   "2": { min: 4, max: 8 },
@@ -92,13 +90,13 @@ function truncateToMax(text: string, max: number): string {
   return out;
 }
 
-// --- OpenAI-compatible endpoints (Groq backup + OmniRoute multi-provider router) ---
-
-const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
-const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
+// --- OpenAI-compatible endpoints (Ollama primary + Groq + OmniRoute + Gemini fallbacks) ---
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com/ollama").replace(/\/+$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
+
+const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
+const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = process.env.GROQ_CHAT_MODEL || process.env.GROQ_MODEL || "openai/gpt-oss-120b";
@@ -193,9 +191,6 @@ async function callOmniRoute(opts: {
   if (!apiKey) {
     throw new Error("OMNIROUTE_API_KEY environment variable is missing.");
   }
-  // No response_format: OmniRoute enruta a 291 proveedores con auto-fallback,
-  // y no todos aceptan response_format json_object. El prompt pide JSON y
-  // parseReply tolera texto plano.
   return callOpenAICompatible({
     baseUrl: OMNIROUTE_BASE_URL,
     apiKey,
@@ -210,6 +205,11 @@ const REPLY_SCHEMA = {
   properties: {
     english: { type: "STRING" },
     spanish: { type: "STRING" },
+    hints: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+      description: "4 short English phrases the student could say next",
+    },
   },
   required: ["english", "spanish"],
 };
@@ -263,6 +263,20 @@ You are a warm, friendly English conversation partner — a real friend, not a t
 ${opts.resume ? `- The student is returning from a previous session. Warmly acknowledge it: reference the last topic in English, briefly and naturally, and ask how they feel today.` : ""}
 
 ${wordRule}
+
+[REPLY HINTS - CRITICAL]
+In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply.
+- Each hint MUST be 3 to 6 words long. Short and simple.
+- Each hint MUST be directly related to what YOU just said.
+- The 4 hints MUST follow this EXACT structure:
+  1. An AFFIRMATION (e.g., "My name is Azul", "I love pizza")
+  2. Another AFFIRMATION (e.g., "I am from Mexico", "I eat tacos")
+  3. A QUESTION back to you (e.g., "What is your name?", "Do you like it?")
+  4. An OPINION or INVITATION (e.g., "I think it is great", "Let us talk about music")
+- All hints MUST be 100% in English.
+- The hints MUST be phrased in the FIRST PERSON, as if the STUDENT is saying them.
+- NEVER repeat the same hint twice in the same reply.
+- ALWAYS return exactly 4 hints, no more, no less.
 `;
 };
 
@@ -282,7 +296,7 @@ async function generateFriendReply(opts: {
       ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words — count carefully, be brief and natural.`
       : "";
 
-  const parseReply = (raw: string): { english: string; spanish: string } => {
+  const parseReply = (raw: string): { english: string; spanish: string; hints: string[] } => {
     const trimmed = (raw || "").trim();
     let parsed: any = null;
     try {
@@ -290,9 +304,15 @@ async function generateFriendReply(opts: {
     } catch {
       parsed = null;
     }
+    const rawHints = parsed && Array.isArray(parsed.hints) ? parsed.hints : [];
+    const hints = rawHints
+      .filter((h: any) => typeof h === "string" && h.trim().length > 0)
+      .map((h: string) => h.trim())
+      .slice(0, 4);
     return {
       english: (parsed && typeof parsed.english === "string" ? parsed.english : trimmed).trim(),
       spanish: (parsed && typeof parsed.spanish === "string" ? parsed.spanish : "").trim(),
+      hints,
     };
   };
 
@@ -304,7 +324,7 @@ async function generateFriendReply(opts: {
       .join("\n");
     const raw = await callOllama({
       system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": ["...", "...", "...", "..."]}`,
       temperature: 0.7,
     });
     return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
@@ -321,7 +341,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callGroq({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": ["...", "...", "...", "..."]}`,
         json: true,
         temperature: 0.7,
       });
@@ -331,7 +351,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  // 1) Backup: OmniRoute (multi-provider router, env-configurable)
+  // 2) Backup: OmniRoute (multi-provider router, env-configurable)
   if (process.env.OMNIROUTE_API_KEY) {
     try {
       const historyText = opts.history
@@ -340,7 +360,7 @@ async function generateFriendReply(opts: {
         .join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "..."}`,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply as the friendly English partner. Respond ONLY with a JSON object: {"english": "...", "spanish": "...", "hints": ["...", "...", "...", "..."]}`,
         temperature: 0.7,
       });
       return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
@@ -349,7 +369,7 @@ async function generateFriendReply(opts: {
     }
   }
 
-  // 2) Backup: Gemini
+  // 3) Backup: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
       const ai = getAiClient();
@@ -375,11 +395,23 @@ async function generateFriendReply(opts: {
     }
   }
 
-  return { english: "", spanish: "", model: "simulation-fallback" };
+  return { english: "", spanish: "", hints: [], model: "simulation-fallback" };
 }
 
 async function translateToSpanish(text: string): Promise<string> {
-  // 0) PRIMARY: Groq
+  // 0) PRIMARY: Ollama local
+  try {
+    const out = await callOllama({
+      system: "You are a warm, natural translator into Latin American Spanish.",
+      user: `Translate to natural, warm Spanish. Only the translation, nothing else: "${text}"`,
+      temperature: 0.2,
+    });
+    return out.trim();
+  } catch (err: any) {
+    console.warn("[FreeTalk] Ollama translate failed, switching to Groq:", err?.message || err);
+  }
+
+  // 1) BACKUP: Groq
   if (process.env.GROQ_API_KEY) {
     try {
       const out = await callGroq({
@@ -393,7 +425,7 @@ async function translateToSpanish(text: string): Promise<string> {
     }
   }
 
-  // 1) Backup: OmniRoute
+  // 2) Backup: OmniRoute
   if (process.env.OMNIROUTE_API_KEY) {
     try {
       const out = await callOmniRoute({
@@ -408,7 +440,7 @@ async function translateToSpanish(text: string): Promise<string> {
     }
   }
 
-  // 2) Backup: Gemini
+  // 3) Backup: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
       const ai = getAiClient();
@@ -467,11 +499,12 @@ app.post("/api/tutor/chat", async (req, res) => {
     const min = isNative ? null : rule.min;
     const max = isNative ? null : rule.max;
 
-    const sendReply = (english: string, spanish: string, model: string) => {
+    const sendReply = (english: string, spanish: string, model: string, hints: string[] = []) => {
       res.json({
         reply: english,
         response: english,
         spanish,
+        reply_hints: hints,
         word_count: countWords(english),
         level,
         min,
@@ -482,7 +515,6 @@ app.post("/api/tutor/chat", async (req, res) => {
       });
     };
 
-    // Regenerar hasta que cumpla el maximo (regla inviolable), luego truncar
     let result = await generateFriendReply({
       history: history || [],
       user_input: inputPrompt,
@@ -495,7 +527,6 @@ app.post("/api/tutor/chat", async (req, res) => {
     });
 
     if (!result.english) {
-      // Friendly fallback (both AIs failed or no keys set) respecting the word limit
       const name = nickname || "friend";
       const byName = name ? ", " + name : "";
       const fallbacks: Record<string, { en: string; es: string }> = {
@@ -505,7 +536,7 @@ app.post("/api/tutor/chat", async (req, res) => {
         native: { en: "That sounds really interesting! Tell me more about it" + byName + ". I want to hear everything.", es: "¡Suena muy interesante! Cuéntame más. Quiero escucharlo todo." },
       };
       const fb = fallbacks[level] || fallbacks["1"];
-      sendReply(fb.en, fb.es, "simulation-fallback");
+      sendReply(fb.en, fb.es, "simulation-fallback", []);
       return;
     }
 
@@ -536,7 +567,7 @@ app.post("/api/tutor/chat", async (req, res) => {
       }
     }
 
-    sendReply(result.english, result.spanish, result.model);
+    sendReply(result.english, result.spanish, result.model, result.hints || []);
   } catch (error: any) {
     console.error("Free Conversation API Error:", error);
     res.status(500).json({
@@ -576,7 +607,24 @@ app.post("/api/tutor/summarize", async (req, res) => {
       };
     };
 
-  // 1) BACKUP: Groq
+    // 0) PRIMARY: Ollama local
+    try {
+      const conversation = (history || [])
+        .map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "Friend"}: ${h.content || h.text || ""}`)
+        .join("\n");
+      const raw = await callOllama({
+        system: "You write warm, concise session summaries for an English learning app.",
+        user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with a JSON object: {"summary_en": "...", "summary_es": "..."}`,
+        temperature: 0.4,
+      });
+      const s = parseSummary(raw);
+      res.json({ ...s, status: "success", model: `ollama/${OLLAMA_MODEL}` });
+      return;
+    } catch (err: any) {
+      console.warn("[Summarize] Ollama failed, switching to Groq:", err?.message || err);
+    }
+
+    // 1) BACKUP: Groq
     if (process.env.GROQ_API_KEY) {
       try {
         const conversation = (history || [])
@@ -596,7 +644,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
       }
     }
 
-    // 1) Backup: OmniRoute
+    // 2) Backup: OmniRoute
     if (process.env.OMNIROUTE_API_KEY) {
       try {
         const conversation = (history || [])
@@ -615,7 +663,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
       }
     }
 
-    // 2) Backup: Gemini
+    // 3) Backup: Gemini
     if (process.env.GEMINI_API_KEY) {
       try {
         const ai = getAiClient();
@@ -659,6 +707,8 @@ app.get("/api/health", (_req, res) => {
     timestamp: new Date().toISOString(),
     apiKeyAvailable: Boolean(process.env.GEMINI_API_KEY),
     omniRouteKeyAvailable: Boolean(process.env.OMNIROUTE_API_KEY),
+    ollamaBaseUrl: OLLAMA_BASE_URL,
+    ollamaModel: OLLAMA_MODEL,
   });
 });
 
@@ -666,8 +716,7 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/system-telemetry", (_req, res) => {
   const uptime = process.uptime();
   const memory = process.memoryUsage();
-  
-  // Synthetic dynamic metrics for HUD feel
+
   const cpuLoad = (Math.sin(Date.now() / 2000) * 15 + 42).toFixed(1);
   const gpuCompute = (Math.cos(Date.now() / 1500) * 20 + 68).toFixed(1);
   const latency = Math.floor(Math.random() * 8 + 12);
@@ -699,7 +748,6 @@ app.post("/api/chat", async (req, res) => {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      // Fallback response if key is missing
       res.json({
         response: `[SYNTHETIC INTELLIGENCE OFFLINE SIMULATION]\nReceived command: "${prompt}".\nTo enable full neural inference, attach your GEMINI_API_KEY in Settings > Secrets.`,
         mode: mode || "ASSISTANT",
@@ -720,11 +768,9 @@ app.post("/api/chat", async (req, res) => {
     } else if (mode === "CREATIVE") {
       systemInstruction = "You are NEXUS-7 AI Neural Innovation Lab. Generate futuristic concepts, speculative algorithmic solutions, and advanced code structures.";
     } else {
-      // Default ASSISTANT mode uses NEXUS-7 Futuristic English Coach with Student ADN Profile
       systemInstruction = buildNexus7SystemInstructions(req.body.user_profile || activeStudentProfile);
     }
 
-    // Standard Gemini 3.6 Flash model call
     const response = await ai.models.generateContent({
       model: "gemini-3.6-flash",
       contents: [
