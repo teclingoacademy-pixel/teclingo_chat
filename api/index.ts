@@ -164,7 +164,7 @@ You are AURIX in FREE MODE. The student wants total freedom to talk about ANYTHI
 
 // --- OpenAI-compatible endpoints ---
 
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com/ollama").replace(/\/+$/, "");
+const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://api.teclingoingles.com").replace(/\/+$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
 const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
@@ -366,7 +366,20 @@ async function generateFriendReply(opts: {
     };
   };
 
-  // 0) PRIMARY: Groq (1-2s, gratis 14,400/día)
+  // 0) PRIMARY: Ollama local (0.9s con keep_alive en RAM)
+  try {
+    const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+    const raw = await callOllama({
+      system: instruction + strict,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+      temperature: 0.7,
+    });
+    return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
+  } catch (err: any) {
+    console.warn("[FreeTalk] Ollama failed, switching to Groq:", err?.message || err);
+  }
+
+  // 1) BACKUP: Groq (1-2s, gratis)
   if (process.env.GROQ_API_KEY) {
     try {
       const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
@@ -378,44 +391,16 @@ async function generateFriendReply(opts: {
       });
       return { ...parseReply(raw), model: GROQ_MODEL };
     } catch (err: any) {
-      console.warn("[FreeTalk] Groq failed, switching to Ollama:", err?.message || err);
+      console.warn("[FreeTalk] Groq failed, switching to Gemini:", err?.message || err);
     }
   }
 
-  // 1) BACKUP: Ollama local
-  try {
-    const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
-    const raw = await callOllama({
-      system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
-      temperature: 0.7,
-    });
-    return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
-  } catch (err: any) {
-    console.warn("[FreeTalk] Ollama failed, switching to OmniRoute:", err?.message || err);
-  }
-
-  // 2) BACKUP: OmniRoute
-  if (process.env.OMNIROUTE_API_KEY) {
-    try {
-      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
-      const raw = await callOmniRoute({
-        system: instruction + strict,
-        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
-        temperature: 0.7,
-      });
-      return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
-    } catch (err: any) {
-      console.warn("[FreeTalk] OmniRoute failed, switching to Gemini:", err?.message || err);
-    }
-  }
-
-  // 3) BACKUP: Gemini
+  // 2) BACKUP: Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
       const ai = getAiClient();
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: "gemini-2.0-flash-exp",
         contents: [
           ...opts.history.slice(-6).map((h) => ({
             role: h.role === "user" ? "user" : "model",
@@ -430,9 +415,24 @@ async function generateFriendReply(opts: {
           responseSchema: REPLY_SCHEMA,
         },
       });
-      return { ...parseReply(response.text || ""), model: "gemini-3.6-flash" };
+      return { ...parseReply(response.text || ""), model: "gemini-2.0-flash-exp" };
     } catch (err: any) {
       console.warn("[FreeTalk] Gemini fallback failed:", err?.message || err);
+    }
+  }
+
+  // 3) BACKUP: OmniRoute
+  if (process.env.OMNIROUTE_API_KEY) {
+    try {
+      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+      const raw = await callOmniRoute({
+        system: instruction + strict,
+        user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+        temperature: 0.7,
+      });
+      return { ...parseReply(raw), model: `omniroute/${OMNIROUTE_MODEL}` };
+    } catch (err: any) {
+      console.warn("[FreeTalk] OmniRoute failed:", err?.message || err);
     }
   }
 
@@ -440,7 +440,18 @@ async function generateFriendReply(opts: {
 }
 
 async function translateToSpanish(text: string): Promise<string> {
-  // Groq primero (rápido)
+  // Ollama primero (rápido, local)
+  try {
+    const out = await callOllama({
+      system: "You are a warm, natural translator into Latin American Spanish.",
+      user: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
+      temperature: 0.2,
+    });
+    return out.trim();
+  } catch (err: any) {
+    console.warn("[FreeTalk] Ollama translate failed, switching to Groq:", err?.message || err);
+  }
+  // Groq fallback
   if (process.env.GROQ_API_KEY) {
     try {
       const out = await callGroq({
@@ -450,19 +461,8 @@ async function translateToSpanish(text: string): Promise<string> {
       });
       return out.trim();
     } catch (err: any) {
-      console.warn("[FreeTalk] Groq translate failed, switching to Ollama:", err?.message || err);
+      console.warn("[FreeTalk] Groq translate failed:", err?.message || err);
     }
-  }
-  // Ollama fallback
-  try {
-    const out = await callOllama({
-      system: "You are a warm, natural translator into Latin American Spanish.",
-      user: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
-      temperature: 0.2,
-    });
-    return out.trim();
-  } catch (err: any) {
-    console.warn("[FreeTalk] Ollama translate failed:", err?.message || err);
   }
   return "";
 }
@@ -554,7 +554,7 @@ app.post("/api/tutor/chat", async (req, res) => {
     while (
       !isNative &&
       (countWords(result.english) > (rule?.max ?? Infinity) || countWords(result.english) < (rule?.min ?? 0)) &&
-      attempts < 3
+      attempts < 2
     ) {
       attempts++;
       console.log(`[FreeTalk] Reintento ${attempts}: ${countWords(result.english)} palabras (necesita ${rule?.min}-${rule?.max})`);
@@ -613,7 +613,20 @@ app.post("/api/tutor/summarize", async (req, res) => {
         summary_es: parsed?.summary_es || "Tuvimos una buena conversación.",
       };
     };
-    // Groq primero
+    // Ollama primero
+    try {
+      const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");
+      const raw = await callOllama({
+        system: "You write warm, concise session summaries for an English learning app.",
+        user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
+        temperature: 0.4,
+      });
+      res.json({ ...parseSummary(raw), status: "success", model: `ollama/${OLLAMA_MODEL}` });
+      return;
+    } catch (err: any) {
+      console.warn("[Summarize] Ollama failed, switching to Groq:", err?.message || err);
+    }
+    // Groq fallback
     if (process.env.GROQ_API_KEY) {
       try {
         const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");
@@ -626,21 +639,8 @@ app.post("/api/tutor/summarize", async (req, res) => {
         res.json({ ...parseSummary(raw), status: "success", model: GROQ_MODEL });
         return;
       } catch (err: any) {
-        console.warn("[Summarize] Groq failed, switching to Ollama:", err?.message || err);
+        console.warn("[Summarize] Groq failed:", err?.message || err);
       }
-    }
-    // Ollama fallback
-    try {
-      const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");
-      const raw = await callOllama({
-        system: "You write warm, concise session summaries for an English learning app.",
-        user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
-        temperature: 0.4,
-      });
-      res.json({ ...parseSummary(raw), status: "success", model: `ollama/${OLLAMA_MODEL}` });
-      return;
-    } catch (err: any) {
-      console.warn("[Summarize] Ollama failed:", err?.message || err);
     }
     res.json(fallbackSummary());
   } catch (error: any) {
