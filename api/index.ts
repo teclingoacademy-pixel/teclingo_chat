@@ -67,14 +67,14 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 // --- FREE CONVERSATION ENGINE ---
 
 // Regulador de palabras por nivel + presupuesto de tokens para Ollama.
-// num_predict CALIBRADO: respuestas cortas con pocos tokens para bajar latencia.
-// Con 60 tokens el modelo 1b se ve forzado a ser breve (3-5 palabras + hints).
-// Con 80 tokens alcanza para nivel 2 (4-7 palabras + hints).
-// Con 300 tokens el modo native tiene espacio para 2-4 frases naturales.
+//
+// IMPORTANTE: numPredict debe ser SUFICIENTE para el JSON completo:
+//   {"english": "...", "spanish": "...", "hints": [4 objetos]}
+// Pesa ~150-200 tokens. Con 60-80 se corta a la mitad. Con 250 alcanza justo.
 const LEVEL_RULES: Record<string, { min: number; max: number; numPredict: number }> = {
-  "1": { min: 3, max: 5, numPredict: 60 },
-  "2": { min: 4, max: 7, numPredict: 80 },
-  "native": { min: 0, max: 9999, numPredict: 300 },
+  "1": { min: 3, max: 5, numPredict: 250 },
+  "2": { min: 4, max: 7, numPredict: 250 },
+  "native": { min: 0, max: 9999, numPredict: 400 },
 };
 
 function countWords(text: string): number {
@@ -216,6 +216,7 @@ async function callOllama(opts: {
   user: string;
   temperature?: number;
   numPredict?: number;
+  json?: boolean;
 }): Promise<string> {
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: "POST",
@@ -224,6 +225,9 @@ async function callOllama(opts: {
       model: OLLAMA_MODEL,
       stream: false,
       keep_alive: "24h",
+      // CRÍTICO: `format: "json"` fuerza al modelo a devolver JSON válido.
+      // Sin esto, llama3.2:1b agrega prosa alrededor del JSON y rompe el parseo.
+      ...(opts.json ? { format: "json" } : {}),
       messages: [
         { role: "system", content: opts.system },
         { role: "user", content: opts.user },
@@ -394,9 +398,10 @@ async function generateFriendReply(opts: {
     const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
     const raw = await callOllama({
       system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "traducción al español de english", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
       temperature: 0.7,
       numPredict,
+      json: true,
     });
     return { ...parseReply(raw), model: `ollama/${OLLAMA_MODEL}` };
   } catch (err: any) {
@@ -584,9 +589,8 @@ app.post("/api/tutor/chat", async (req, res) => {
       result.english = truncateToMax(result.english, rule?.max ?? Infinity);
     }
 
-    if (!result.spanish && result.english) {
-      try { result.spanish = await translateToSpanish(result.english); } catch { result.spanish = ""; }
-    }
+    // NO llamamos a translateToSpanish — el modelo ya devuelve "spanish" en el JSON.
+    // Esto elimina una segunda llamada a Ollama (~2-3s de latencia).
 
     sendReply(result.english, result.spanish, result.model, result.hints || []);
   } catch (error: any) {
@@ -629,7 +633,8 @@ app.post("/api/tutor/summarize", async (req, res) => {
         system: "You write warm, concise session summaries for an English learning app.",
         user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
         temperature: 0.4,
-        numPredict: 250,
+        numPredict: 300,
+        json: true,
       });
       res.json({ ...parseSummary(raw), status: "success", model: `ollama/${OLLAMA_MODEL}` });
       return;
