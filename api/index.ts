@@ -68,13 +68,13 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 
 // Regulador de palabras por nivel + presupuesto de tokens para Ollama.
 //
-// numPredict debe ser SUFICIENTE para el JSON completo:
+// FIX 2026-10-05: numPredict subido a 300 (antes 200) porque el JSON completo
 //   {"english": "...", "spanish": "...", "hints": [4 objetos]}
-// Con hints de 3-5 palabras pesa ~120-150 tokens. 200 alcanza para niveles 1/2.
+// pesa ~180-220 tokens. Con 200 se cortaba a medias y el parseo fallaba.
 const LEVEL_RULES: Record<string, { min: number; max: number; numPredict: number }> = {
-  "1": { min: 3, max: 5, numPredict: 200 },
-  "2": { min: 4, max: 7, numPredict: 200 },
-  "native": { min: 0, max: 9999, numPredict: 350 },
+  "1": { min: 3, max: 5, numPredict: 300 },
+  "2": { min: 4, max: 7, numPredict: 300 },
+  "native": { min: 0, max: 9999, numPredict: 400 },
 };
 
 function countWords(text: string): number {
@@ -298,6 +298,8 @@ const SUMMARY_SCHEMA = {
   required: ["summary_en", "summary_es"],
 };
 
+// FIX 2026-10-05: Acepta isFirstTurn para decidir si incluir la instrucción
+// de "First message: introdúcete" o la regla de "NO te presentes de nuevo".
 const buildFreeTalkInstructions = (opts: {
   level: string;
   nickname: string;
@@ -305,6 +307,7 @@ const buildFreeTalkInstructions = (opts: {
   min: number | null;
   max: number | null;
   role?: FreeTalkRole;
+  isFirstTurn: boolean;
 }) => {
   const studentName = opts.nickname || "friend";
   const isNative = opts.level === "native" || !opts.min || !opts.max;
@@ -324,6 +327,14 @@ const buildFreeTalkInstructions = (opts: {
     ✓ VALID: "That's cool! Tell me more." (5 words)
     ✗ INVALID (too long): "Hi there! How are you doing today my friend?" (9 words)
     ✗ INVALID (too short): "Hi!" (1 word)`;
+
+  // FIX 2026-10-05: instrucción condicional según si es el primer turno.
+  const personaRule = opts.isFirstTurn
+    ? persona.instructions
+    : `You are ${personaName} — the SAME person from earlier in this conversation.
+- DO NOT introduce yourself again. DO NOT say "Hi, I'm ${personaName}!" again.
+- Continue the conversation naturally from the student's last message.
+- ${persona.instructions.split("\n").filter((l) => l.trim() && !l.toLowerCase().includes("first message")).join("\n")}`;
 
   return `
 Your persona name is "${personaName}". The student's name is ${studentName}.
@@ -355,7 +366,7 @@ ${opts.resume ? `- The student is returning from a previous session. Warmly ackn
 
 ${wordRule}
 
-${persona.instructions}
+${personaRule}
 
 [REPLY HINTS - CRITICAL]
 In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply, EACH WITH ITS SPANISH TRANSLATION.
@@ -380,7 +391,9 @@ async function generateFriendReply(opts: {
   extraStrict: boolean;
   role: FreeTalkRole;
 }) {
-  const instruction = buildFreeTalkInstructions(opts);
+  // FIX 2026-10-05: isFirstTurn evita que la persona se presente de nuevo.
+  const isFirstTurn = opts.history.length === 0;
+  const instruction = buildFreeTalkInstructions({ ...opts, isFirstTurn });
   const strict = opts.extraStrict && opts.min && opts.max
     ? `\n\nEXTREMELY IMPORTANT: your previous attempt broke the sacred word limit. This time the "english" field MUST contain between ${opts.min} and ${opts.max} words.`
     : "";
@@ -404,9 +417,9 @@ async function generateFriendReply(opts: {
   const levelRule = LEVEL_RULES[opts.level];
   const numPredict = levelRule?.numPredict ?? 400;
 
-  // 0) PRIMARY: Ollama local — solo últimos 4 turnos de historial
+  // 0) PRIMARY: Ollama local — solo últimos 6 turnos de historial
   try {
-    const historyText = opts.history.slice(-4).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+    const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
     const raw = await callOllama({
       system: instruction + strict,
       user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
@@ -422,7 +435,7 @@ async function generateFriendReply(opts: {
   // 1) BACKUP: Groq
   if (process.env.GROQ_API_KEY) {
     try {
-      const historyText = opts.history.slice(-4).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
       const raw = await callGroq({
         system: instruction + strict,
         user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
@@ -442,7 +455,7 @@ async function generateFriendReply(opts: {
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash-exp",
         contents: [
-          ...opts.history.slice(-4).map((h) => ({
+          ...opts.history.slice(-6).map((h) => ({
             role: h.role === "user" ? "user" : "model",
             parts: [{ text: h.text }],
           })),
@@ -464,7 +477,7 @@ async function generateFriendReply(opts: {
   // 3) BACKUP: OmniRoute
   if (process.env.OMNIROUTE_API_KEY) {
     try {
-      const historyText = opts.history.slice(-4).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
         user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
@@ -590,6 +603,28 @@ app.post("/api/tutor/chat", async (req, res) => {
       return;
     }
 
+    // FIX 2026-10-05: hasta 3 reintentos (antes 2) si la respuesta rompe min o max.
+    let attempts = 0;
+    while (
+      !isNative &&
+      (countWords(result.english) > (rule?.max ?? Infinity) || countWords(result.english) < (rule?.min ?? 0)) &&
+      attempts < 3
+    ) {
+      attempts++;
+      console.log(`[FreeTalk] Reintento ${attempts}: ${countWords(result.english)} palabras (necesita ${rule?.min}-${rule?.max})`);
+      result = await generateFriendReply({
+        history: history || [],
+        user_input: inputPrompt,
+        level,
+        nickname,
+        resume,
+        min,
+        max,
+        extraStrict: true,
+        role,
+      });
+    }
+
     // Si la respuesta excede el máximo, se trunca y se añade un hint de nivel.
     let levelHint: string | undefined = undefined;
     if (!isNative && countWords(result.english) > (rule?.max ?? Infinity)) {
@@ -597,8 +632,17 @@ app.post("/api/tutor/chat", async (req, res) => {
       levelHint = "Si quieres que AURIX responda con frases más largas, sube al Nivel 2 o al modo Nativo.";
     }
 
-    // Traducción de respaldo solo si el modelo no la devolvió
-    if (!result.spanish && result.english) {
+    // FIX 2026-10-05: validar el campo "spanish" del modelo. Si es sospechoso
+    // (vacío, igual al english, sin vocales, o demasiado largo), regenerarlo.
+    const isSpanishSuspicious = (s: string, eng: string): boolean => {
+      if (!s || s.length < 2) return true;
+      if (s.toLowerCase() === eng.toLowerCase()) return true;
+      if (!/[aeiouáéíóúñ]/i.test(s)) return true;
+      if (s.length > 200) return true;
+      return false;
+    };
+    if (isSpanishSuspicious(result.spanish, result.english)) {
+      console.log("[FreeTalk] spanish sospechoso, regenerando:", result.spanish);
       try { result.spanish = await translateToSpanish(result.english); } catch { result.spanish = ""; }
     }
 
