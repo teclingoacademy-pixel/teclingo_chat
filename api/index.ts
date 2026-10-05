@@ -67,13 +67,14 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 // --- FREE CONVERSATION ENGINE ---
 
 // Regulador de palabras por nivel + presupuesto de tokens para Ollama.
-// num_predict debe ser suficiente para: JSON + english + spanish + 4 hints.
-// Con 80 tokens alcanza para nivel 1 (3-5 palabras + hints cortos).
-// Con 500 tokens el modo native tiene espacio para 2-4 frases naturales.
+// num_predict CALIBRADO: respuestas cortas con pocos tokens para bajar latencia.
+// Con 60 tokens el modelo 1b se ve forzado a ser breve (3-5 palabras + hints).
+// Con 80 tokens alcanza para nivel 2 (4-7 palabras + hints).
+// Con 300 tokens el modo native tiene espacio para 2-4 frases naturales.
 const LEVEL_RULES: Record<string, { min: number; max: number; numPredict: number }> = {
-  "1": { min: 3, max: 5, numPredict: 90 },
-  "2": { min: 4, max: 7, numPredict: 110 },
-  "native": { min: 0, max: 9999, numPredict: 500 },
+  "1": { min: 3, max: 5, numPredict: 60 },
+  "2": { min: 4, max: 7, numPredict: 80 },
+  "native": { min: 0, max: 9999, numPredict: 300 },
 };
 
 function countWords(text: string): number {
@@ -171,7 +172,7 @@ You are AURIX in FREE MODE. The student wants total freedom to talk about ANYTHI
 // --- OpenAI-compatible endpoints ---
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "https://ollama.teclingoingles.com").replace(/\/+$/, "");
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:1b";
 const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://192.168.0.15:20128").replace(/\/+$/, "");
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "gpt-4o-mini";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -310,7 +311,12 @@ const buildFreeTalkInstructions = (opts: {
 
   const wordRule = isNative
     ? `- NO word limit: reply naturally, like a normal native speaker, at a relaxed pace (2-4 sentences).`
-    : `- HARD WORD LIMIT (SACRED RULE, NEVER BREAK IT): your "english" reply MUST contain between ${opts.min} and ${opts.max} words. Count every single word. NEVER exceed ${opts.max} words and NEVER write fewer than ${opts.min}. This rule is non-negotiable.`;
+    : `- ABSOLUTE WORD LIMIT (CRITICAL): your "english" field MUST contain EXACTLY between ${opts.min} and ${opts.max} words. Count every single word BEFORE responding. If your sentence is longer, DELETE words until it fits. If it's shorter, ADD words. NEVER break this limit.
+  Examples for level ${opts.level} (${opts.min}-${opts.max} words):
+  ✓ VALID: "Hi! How are you?" (4 words)
+  ✓ VALID: "That's cool! Tell me more." (5 words)
+  ✗ INVALID (too long): "Hi there! How are you doing today my friend?" (9 words)
+  ✗ INVALID (too short): "Hi!" (1 word)`;
 
   return `
 Your persona name is "${personaName}". The student's name is ${studentName}.
@@ -570,26 +576,9 @@ app.post("/api/tutor/chat", async (req, res) => {
       return;
     }
 
-    let attempts = 0;
-    while (
-      !isNative &&
-      (countWords(result.english) > (rule?.max ?? Infinity) || countWords(result.english) < (rule?.min ?? 0)) &&
-      attempts < 2
-    ) {
-      attempts++;
-      console.log(`[FreeTalk] Reintento ${attempts}: ${countWords(result.english)} palabras (necesita ${rule?.min}-${rule?.max})`);
-      result = await generateFriendReply({
-        history: history || [],
-        user_input: inputPrompt,
-        level,
-        nickname,
-        resume,
-        min,
-        max,
-        extraStrict: true,
-        role,
-      });
-    }
+    // NO reintentos: si la primera respuesta excede el límite, se trunca.
+    // Antes hacíamos hasta 2 reintentos (cada uno ~8s con llama3.2:3b), sumando 24s de latencia.
+    // Ahora confiamos en el prompt reforzado + numPredict calibrado, y truncamos como red de seguridad.
 
     if (!isNative && countWords(result.english) > (rule?.max ?? Infinity)) {
       result.english = truncateToMax(result.english, rule?.max ?? Infinity);
@@ -640,7 +629,7 @@ app.post("/api/tutor/summarize", async (req, res) => {
         system: "You write warm, concise session summaries for an English learning app.",
         user: `Conversation:\n${conversation}\n\n${summaryPrompt}\n\nRespond ONLY with JSON: {"summary_en": "...", "summary_es": "..."}`,
         temperature: 0.4,
-        numPredict: 300,
+        numPredict: 250,
       });
       res.json({ ...parseSummary(raw), status: "success", model: `ollama/${OLLAMA_MODEL}` });
       return;
