@@ -14,7 +14,7 @@ import {
 import * as Identity from "../services/identityService";
 import { Mic, MicOff, Send, AlertTriangle, ShieldAlert, Play, X, Sparkles, Volume2, Languages } from "lucide-react";
 
-type Phase = "onboarding" | "conversation" | "finished" | "off";
+type Phase = "onboarding" | "resume" | "conversation" | "finished" | "off";
 const CLOUD_API = "https://script.google.com/macros/s/AKfycbw0VN6XVNz_qdEx6zmAI5YMTPQG7acYcssVqBC4q5WO0vjbXV0H8oHqfbUZWURhIHhE/exec";
 const MAIN_APP_URL = "https://aurix-ver1-teclingo.vercel.app/";
 const VALID_ACCESS_CODE = "AURIX2026";
@@ -219,7 +219,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   const [summary, setSummary] = useState<{ en: string; es: string }>({ en: "", es: "" });
   const [cloudUsers, setCloudUsers] = useState<{ id: string; nickname: string }[]>([]);
   const [cloudTick, setCloudTick] = useState(0);
-  // Traducciones visibles por mensaje (índices). Conjunto de índices donde mostramos el español.
   const [visibleTranslations, setVisibleTranslations] = useState<Set<number>>(() => new Set());
 
   const [showHintTranslations, setShowHintTranslations] = useState<boolean>(() => {
@@ -323,7 +322,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     } catch (err) { console.warn('[TTS] Error al desbloquear audio:', err); }
   }, []);
 
-  // TTS SIEMPRE en inglés (aunque el usuario hable en español, AURIX responde en inglés).
   const speakFriend = useCallback(
     (text: string, onEnd?: () => void) => speakNow(text, "en-US", parseFloat(speed), onEnd),
     [speakNow, speed]
@@ -402,7 +400,6 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       setLiveTranscript("");
       setIsProcessing(true);
       try {
-        // Enviamos al backend SOLO los últimos 6 turnos (memoria corta y limpia).
         const history = (opts?.asStart ? [] : current).slice(-6).map((m) => ({ role: m.role, text: m.text }));
         const resume = freeTalkStore.getSummary().es || undefined;
         const data = await sendFreeTalkMessage(trimmed, history, { level, nickname, role, resume });
@@ -444,7 +441,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
   const startFirstMessage = useCallback(
     async () => {
-      if (phase === "onboarding" && narratorBusy) return;
+      if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
       playTransition();
       setMessages([]);
       historyReadyRef.current = false;
@@ -459,6 +456,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     [sendMessage, speakFriend, phase, narratorBusy, nickname]
   );
 
+  // Narración de onboarding por paso
   useEffect(() => {
     if (phase === "onboarding") {
       if (obStep === 0) {
@@ -475,6 +473,19 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
       }
     }
   }, [phase, obStep, speakNarrator, nickname]);
+
+  // Cuando el usuario vuelve (fase "resume"), el narrador lee el resumen guardado.
+  useEffect(() => {
+    if (phase !== "resume") return;
+    const s = freeTalkStore.getSummary();
+    const name = freeTalkStore.getNickname() || "amigo";
+    const resumeText = s.es || "La última vez tuvimos una buena conversación en inglés, y me encantó conocerte.";
+    setNarratorBusy(true);
+    const t = setTimeout(() => {
+      speakNarrator("¡Hola " + name + "! Qué gusto verte de nuevo. Recordando nuestra última plática: " + cleanTTS(resumeText) + " ¿Quieres seguir practicando? Cuando estés listo, di la frase de inicio para activar la conversación en inglés.");
+    }, 700);
+    return () => { clearTimeout(t); };
+  }, [phase, speakNarrator]);
 
   useEffect(() => { return () => stopSpeaking(); }, [stopSpeaking]);
 
@@ -647,7 +658,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
   };
 
   const sayKickoff = () => {
-    if (phase === "onboarding" && narratorBusy) return;
+    if ((phase === "onboarding" || phase === "resume") && narratorBusy) return;
     const rec = ensureRecognition();
     if (!rec) { startFirstMessage(); return; }
     toggleListening();
@@ -657,7 +668,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     if (email) Identity.logActividadGlobal(email, herramienta, accion, detalle).catch(() => {});
   };
 
-  const isProtocolBlocked = phase === "onboarding" && narratorBusy;
+  const isProtocolBlocked = (phase === "onboarding" || phase === "resume") && narratorBusy;
 
   const kickoff = (
     <div className="flex flex-col items-center gap-4 text-center">
@@ -895,6 +906,24 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     );
   };
 
+  // Pantalla de bienvenida para usuario recurrente (con resumen, SIN historial de mensajes).
+  const renderResume = () => {
+    const s = freeTalkStore.getSummary();
+    return (
+      <div className="flex flex-col gap-4 max-w-md w-full">
+        <h2 className="text-2xl font-geist font-bold text-white">¡Hola de nuevo, {nickname || "amigo"}! 👋</h2>
+        <div className="ft-card">
+          <p className="text-sm text-white font-semibold mb-1">Nuestra última conversación</p>
+          <p className="text-sm text-[#849495] leading-relaxed">{s.es || "Platicamos en inglés y me encantó conocerte."}</p>
+        </div>
+        <p className="text-sm text-[#849495] leading-relaxed">
+          ¿Quieres seguir practicando? Di la frase de inicio para retomar la conversación <b className="text-white">en inglés</b>.
+        </p>
+        {kickoff}
+      </div>
+    );
+  };
+
   const handleExit = () => {
     attemptExit(() => {
       stopSpeaking();
@@ -1115,8 +1144,9 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     </div>
   );
 
-  // INICIALIZACIÓN: SIEMPRE arrancamos en onboarding (no cargamos historial previo).
-  // El usuario empieza con un chat limpio y una propuesta de conversación.
+  // INICIALIZACIÓN: chat limpio (no cargamos mensajes), pero sí nickname + resumen.
+  // Si hay nickname + resumen → fase "resume" (bienvenida personalizada).
+  // Si no hay → fase "onboarding" (primera vez).
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -1124,17 +1154,23 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
     } catch {}
     if (freeTalkStore.getVersion() !== STORAGE_VERSION) { freeTalkStore.reset(); freeTalkStore.setVersion(STORAGE_VERSION); }
     const savedName = freeTalkStore.getNickname() || "";
+    const savedSummary = freeTalkStore.getSummary();
     setNickname(savedName);
     setLevel(freeTalkStore.getLevel());
     setSpeed(freeTalkStore.getSpeed());
     setRole(freeTalkStore.getRole());
-    // SIEMPRE onboarding — no cargamos historial previo (ni mensajes, ni resumen).
+    // NO cargamos historial de mensajes (chat limpio siempre).
     setMessages([]);
     messagesRef.current = [];
     historyReadyRef.current = false;
     setVisibleTranslations(new Set());
-    setObStep(0);
-    setPhase("onboarding");
+    const returning = Boolean(savedName) && Boolean(savedSummary?.es || savedSummary?.en);
+    if (returning) {
+      setPhase("resume");
+    } else {
+      setObStep(0);
+      setPhase("onboarding");
+    }
   }, []);
 
   useEffect(() => {
@@ -1192,6 +1228,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
   const headerLabel =
     phase === "conversation" ? "CONVERSACIÓN LIBRE · INGLÉS"
+    : phase === "resume" ? "BIENVENIDO DE NUEVO"
     : phase === "finished" ? "SESIÓN GUARDADA"
     : "CONVERSACIÓN LIBRE · ESPAÑOL";
 
@@ -1323,6 +1360,7 @@ export const ConversationChat: React.FC<{ onExit?: () => void }> = ({ onExit }) 
 
       <main className="relative z-10 flex-1 overflow-y-auto ft-scroll px-4 py-5 flex items-start justify-center">
         {phase === "onboarding" && renderOnboarding()}
+        {phase === "resume" && renderResume()}
         {phase === "conversation" && (
           <div className="h-full w-full flex flex-col">{renderConversation()}</div>
         )}
