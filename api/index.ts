@@ -68,13 +68,13 @@ Tu misión es guiar al estudiante de forma clara, natural y entretenida, haciend
 
 // Regulador de palabras por nivel + presupuesto de tokens para Ollama.
 //
-// IMPORTANTE: numPredict debe ser SUFICIENTE para el JSON completo:
+// numPredict debe ser SUFICIENTE para el JSON completo:
 //   {"english": "...", "spanish": "...", "hints": [4 objetos]}
-// Pesa ~150-200 tokens. Con 60-80 se corta a la mitad. Con 250 alcanza justo.
+// Con hints de 3-5 palabras pesa ~120-150 tokens. 200 alcanza para niveles 1/2.
 const LEVEL_RULES: Record<string, { min: number; max: number; numPredict: number }> = {
-  "1": { min: 3, max: 5, numPredict: 250 },
-  "2": { min: 4, max: 7, numPredict: 250 },
-  "native": { min: 0, max: 9999, numPredict: 400 },
+  "1": { min: 3, max: 5, numPredict: 200 },
+  "2": { min: 4, max: 7, numPredict: 200 },
+  "native": { min: 0, max: 9999, numPredict: 350 },
 };
 
 function countWords(text: string): number {
@@ -226,7 +226,6 @@ async function callOllama(opts: {
       stream: false,
       keep_alive: "24h",
       // CRÍTICO: `format: "json"` fuerza al modelo a devolver JSON válido.
-      // Sin esto, llama3.2:1b agrega prosa alrededor del JSON y rompe el parseo.
       ...(opts.json ? { format: "json" } : {}),
       messages: [
         { role: "system", content: opts.system },
@@ -315,28 +314,40 @@ const buildFreeTalkInstructions = (opts: {
 
   const wordRule = isNative
     ? `- NO word limit: reply naturally, like a normal native speaker, at a relaxed pace (2-4 sentences).`
-    : `- ABSOLUTE WORD LIMIT (CRITICAL): your "english" field MUST contain EXACTLY between ${opts.min} and ${opts.max} words. Count every single word BEFORE responding. If your sentence is longer, DELETE words until it fits. If it's shorter, ADD words. NEVER break this limit.
-  Examples for level ${opts.level} (${opts.min}-${opts.max} words):
-  ✓ VALID: "Hi! How are you?" (4 words)
-  ✓ VALID: "That's cool! Tell me more." (5 words)
-  ✗ INVALID (too long): "Hi there! How are you doing today my friend?" (9 words)
-  ✗ INVALID (too short): "Hi!" (1 word)`;
+    : `- ABSOLUTE WORD LIMIT (CRITICAL): your "english" field MUST contain EXACTLY between ${opts.min} and ${opts.max} words. Count every word BEFORE responding.
+  - If you CANNOT say what you want in ${opts.max} words or less, then:
+    * Change topic with a short phrase: "Let's talk about you!"
+    * Encourage the student: "Try a higher level!" (this is 5 words)
+    * React briefly: "Cool! Tell me more." — but NEVER write a long sentence.
+  - Examples for level ${opts.level} (${opts.min}-${opts.max} words):
+    ✓ VALID: "Hi! How are you?" (4 words)
+    ✓ VALID: "That's cool! Tell me more." (5 words)
+    ✗ INVALID (too long): "Hi there! How are you doing today my friend?" (9 words)
+    ✗ INVALID (too short): "Hi!" (1 word)`;
 
   return `
 Your persona name is "${personaName}". The student's name is ${studentName}.
 - ALWAYS address the student by their name "${studentName}" often and naturally.
 - NEVER call the student "friend", "buddy", "pal" or "amigo". The word "friend" is FORBIDDEN as a form of address.
 
+[COHERENCE RULES - CRITICAL]
+- Your response MUST relate to the student's LAST message. Read it carefully.
+- If the student asks "why?" or "why not?", you MUST answer with a REASON (a fact, an opinion, a preference). Example: "Why Japan?" → "Because of the food!" or "The temples are amazing!"
+- FORBIDDEN PHRASES — NEVER use these: "Sounds nice", "Tell me more", "That's interesting", "Great question", "Good question", "Good point", "Interesting question". If you can't think of anything, change the topic instead.
+- If the student repeats the question and you still don't know, CHANGE THE TOPIC with a related question. Example: "Hmm, let's talk about something else. What music do you like?"
+- Every response should keep the conversation flowing. End with a question OR an invitation.
+
 [PERSONALITY]
-- Speak only English. Use simple, natural, friendly English suited to a learner.
+- Speak only English in the "english" field. Use simple, natural, friendly English suited to a learner.
 - Never give grammar lessons, never correct, never explain rules, never lecture.
 - Just converse like a real person who is genuinely curious about the student.
-- FORBIDDEN PHRASES: "Sounds nice", "Tell me more", "That's interesting", "That sounds good". These are BANNED. Always react with SPECIFIC content related to what the student just said.
 
 [HARD RULES]
 - The "english" field must be 100% in English.
+- The "spanish" field MUST be the actual translation of the "english" field to Spanish. NEVER copy the prompt. NEVER write "traducción al español". Just the translation.
+  Example: english="Hi, Ana!" → spanish="¡Hola, Ana!"
+  Example: english="That's cool!" → spanish="¡Qué padre!"
 - If the student writes in Spanish, gently invite them to try it in English.
-- You always take the first step when a conversation starts.
 - Ask open, friendly questions ("What...?", "How...?", "Tell me about...").
 - Adapt the difficulty of your words to a low level.
 - When the student mentions a topic (music, food, travel, work, family, movies, sports), react with a SPECIFIC comment about that exact topic: mention an artist, a dish, a place, an example. Then ask ONE relevant follow-up question.
@@ -348,12 +359,13 @@ ${persona.instructions}
 
 [REPLY HINTS - CRITICAL]
 In addition to "english" and "spanish", you MUST return a "hints" array with EXACTLY 4 short English phrases the student could say as their NEXT reply, EACH WITH ITS SPANISH TRANSLATION.
-- Each hint MUST be 3 to 6 words long in English.
+- Each hint MUST be 3 to 5 words long in English. NEVER longer than 5 words.
 - Each hint MUST be directly related to what YOU just said.
 - The 4 hints MUST follow this structure: 2 AFFIRMATIONS, 1 QUESTION, 1 OPINION or INVITATION.
 - All hints MUST be in FIRST PERSON, as if the STUDENT is saying them.
 - NEVER repeat the same hint.
 - The "hints" array MUST contain 4 OBJECTS, each with "en" and "es" keys.
+- Example hints: [{"en": "Me too!", "es": "¡Yo también!"}, {"en": "What about you?", "es": "¿Y tú?"}, {"en": "I love pizza.", "es": "Amo la pizza."}, {"en": "That sounds fun!", "es": "¡Suena divertido!"}]
 `;
 };
 
@@ -389,16 +401,15 @@ async function generateFriendReply(opts: {
     };
   };
 
-  // Calcular tokens según nivel
   const levelRule = LEVEL_RULES[opts.level];
   const numPredict = levelRule?.numPredict ?? 400;
 
-  // 0) PRIMARY: Ollama local
+  // 0) PRIMARY: Ollama local — solo últimos 4 turnos de historial
   try {
-    const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+    const historyText = opts.history.slice(-4).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
     const raw = await callOllama({
       system: instruction + strict,
-      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "traducción al español de english", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
+      user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
       temperature: 0.7,
       numPredict,
       json: true,
@@ -411,7 +422,7 @@ async function generateFriendReply(opts: {
   // 1) BACKUP: Groq
   if (process.env.GROQ_API_KEY) {
     try {
-      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+      const historyText = opts.history.slice(-4).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
       const raw = await callGroq({
         system: instruction + strict,
         user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
@@ -431,7 +442,7 @@ async function generateFriendReply(opts: {
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash-exp",
         contents: [
-          ...opts.history.slice(-6).map((h) => ({
+          ...opts.history.slice(-4).map((h) => ({
             role: h.role === "user" ? "user" : "model",
             parts: [{ text: h.text }],
           })),
@@ -453,7 +464,7 @@ async function generateFriendReply(opts: {
   // 3) BACKUP: OmniRoute
   if (process.env.OMNIROUTE_API_KEY) {
     try {
-      const historyText = opts.history.slice(-6).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
+      const historyText = opts.history.slice(-4).map((h) => `${h.role === "user" ? "Student" : "You"}: ${h.text}`).join("\n");
       const raw = await callOmniRoute({
         system: instruction + strict,
         user: `Conversation so far:\n${historyText}\n\nStudent's latest message: "${opts.user_input}"\n\nReply. Respond ONLY with JSON: {"english": "...", "spanish": "...", "hints": [{"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}, {"en": "...", "es": "..."}]}`,
@@ -469,19 +480,17 @@ async function generateFriendReply(opts: {
 }
 
 async function translateToSpanish(text: string): Promise<string> {
-  // Ollama primero (rápido, local)
   try {
     const out = await callOllama({
       system: "You are a warm, natural translator into Latin American Spanish.",
       user: `Translate to natural, warm Spanish. Only the translation: "${text}"`,
       temperature: 0.2,
-      numPredict: 200,
+      numPredict: 100,
     });
     return out.trim();
   } catch (err: any) {
     console.warn("[FreeTalk] Ollama translate failed, switching to Groq:", err?.message || err);
   }
-  // Groq fallback
   if (process.env.GROQ_API_KEY) {
     try {
       const out = await callGroq({
@@ -536,7 +545,7 @@ app.post("/api/tutor/chat", async (req, res) => {
     const min = isNative ? null : rule.min;
     const max = isNative ? null : rule.max;
 
-    const sendReply = (english: string, spanish: string, model: string, hints: { en: string; es: string }[] = []) => {
+    const sendReply = (english: string, spanish: string, model: string, hints: { en: string; es: string }[] = [], levelHint?: string) => {
       const persona = ROLE_PERSONAS[role] || ROLE_PERSONAS.friend;
       res.json({
         reply: english,
@@ -552,6 +561,7 @@ app.post("/api/tutor/chat", async (req, res) => {
         status: "success",
         timestamp: new Date().toISOString(),
         model,
+        ...(levelHint ? { level_hint: levelHint } : {}),
       });
     };
 
@@ -568,7 +578,6 @@ app.post("/api/tutor/chat", async (req, res) => {
     });
 
     if (!result.english) {
-      // Fallback natural (no genérico) — solo se dispara si TODOS los modelos fallan.
       const name = nickname || "friend";
       const byName = name ? ", " + name : "";
       const fallbacks: Record<string, { en: string; es: string }> = {
@@ -581,18 +590,19 @@ app.post("/api/tutor/chat", async (req, res) => {
       return;
     }
 
-    // NO reintentos: si la primera respuesta excede el límite, se trunca.
-    // Antes hacíamos hasta 2 reintentos (cada uno ~8s con llama3.2:3b), sumando 24s de latencia.
-    // Ahora confiamos en el prompt reforzado + numPredict calibrado, y truncamos como red de seguridad.
-
+    // Si la respuesta excede el máximo, se trunca y se añade un hint de nivel.
+    let levelHint: string | undefined = undefined;
     if (!isNative && countWords(result.english) > (rule?.max ?? Infinity)) {
       result.english = truncateToMax(result.english, rule?.max ?? Infinity);
+      levelHint = "Si quieres que AURIX responda con frases más largas, sube al Nivel 2 o al modo Nativo.";
     }
 
-    // NO llamamos a translateToSpanish — el modelo ya devuelve "spanish" en el JSON.
-    // Esto elimina una segunda llamada a Ollama (~2-3s de latencia).
+    // Traducción de respaldo solo si el modelo no la devolvió
+    if (!result.spanish && result.english) {
+      try { result.spanish = await translateToSpanish(result.english); } catch { result.spanish = ""; }
+    }
 
-    sendReply(result.english, result.spanish, result.model, result.hints || []);
+    sendReply(result.english, result.spanish, result.model, result.hints || [], levelHint);
   } catch (error: any) {
     console.error("Free Conversation API Error:", error);
     res.status(500).json({
@@ -607,10 +617,6 @@ app.post("/api/tutor/chat", async (req, res) => {
 app.post("/api/tutor/summarize", async (req, res) => {
   try {
     const { history, nickname } = req.body;
-    const turns = (history || []).map((h: { role: string; content?: string; text?: string }) => ({
-      role: h.role === "user" ? "user" : "model",
-      parts: [{ text: h.content || h.text || "" }],
-    }));
     const summaryPrompt = `Write a short session summary of this English conversation${nickname ? " with " + nickname : ""}. Return JSON: summary_en (2-3 warm sentences in English) and summary_es (2-3 warm sentences in Spanish).`;
     const fallbackSummary = () => ({
       summary_en: "We had a friendly conversation in English.",
@@ -626,7 +632,6 @@ app.post("/api/tutor/summarize", async (req, res) => {
         summary_es: parsed?.summary_es || "Tuvimos una buena conversación.",
       };
     };
-    // Ollama primero
     try {
       const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");
       const raw = await callOllama({
@@ -641,7 +646,6 @@ app.post("/api/tutor/summarize", async (req, res) => {
     } catch (err: any) {
       console.warn("[Summarize] Ollama failed, switching to Groq:", err?.message || err);
     }
-    // Groq fallback
     if (process.env.GROQ_API_KEY) {
       try {
         const conversation = (history || []).map((h: { role: string; content?: string; text?: string }) => `${h.role === "user" ? "Student" : "You"}: ${h.content || h.text || ""}`).join("\n");

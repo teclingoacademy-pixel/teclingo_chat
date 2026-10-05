@@ -6,6 +6,8 @@ export interface FreeTalkTurn {
   role: "user" | "assistant";
   text: string;
   spanish?: string;
+  /** Hint del backend cuando la respuesta se truncó por exceder el nivel. */
+  levelHint?: string;
 }
 
 export interface ChatReply {
@@ -19,6 +21,8 @@ export interface ChatReply {
   min: number | null;
   max: number | null;
   status: string;
+  /** Si el backend truncó la respuesta, incluye un mensaje para el usuario. */
+  level_hint?: string;
 }
 
 export const STORAGE_VERSION = "1";
